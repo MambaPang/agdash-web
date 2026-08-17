@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<title>AgDash 手机端</title>
+<style>
+/* ============================================================
+   B4 手机页 · 深色主题（色板对齐固件 theme.h：
+   BG #000000 / CARD #12203A / OK #5DCAA5 / WARN #FAC775 /
+   MUTED #8FA3BD / TEXT #FFFFFF）
+   ============================================================ */
+:root {
+  --bg: #000000;
+  --card: #12203A;
+  --card-hi: #1B2F52;
+  --ok: #5DCAA5;
+  --warn: #FAC775;
+  --muted: #8FA3BD;
+  --text: #FFFFFF;
+  --danger: #E06C6C;
+  --radius: 14px;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--text);
+  font-family: system-ui, -apple-system, "PingFang SC", "Noto Sans SC",
+               "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+}
+body { padding-bottom: 40px; }
+button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+input, select {
+  font: inherit; color: var(--text);
+  background: #0B1526; border: 1px solid #2A3D5F;
+  border-radius: 10px; padding: 10px 12px; width: 100%;
+}
+input:focus, select:focus { outline: 2px solid var(--ok); border-color: transparent; }
+
+/* ---- 顶栏 ---- */
+header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 8px;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 10px;
+  background: rgba(0,0,0,.92); backdrop-filter: blur(6px);
+  border-bottom: 1px solid #101B30;
+}
+header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .5px; flex: 1; }
+.pill {
+  border-radius: 999px; padding: 7px 14px; font-size: 14px; font-weight: 700;
+  background: #0B1526; border: 1px solid #2A3D5F; color: var(--muted);
+}
+.pill.on  { color: #05231A; background: var(--ok); border-color: var(--ok); }
+.pill.off { color: var(--muted); }
+.pill.pending { opacity: .55; }
+.iconbtn {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: #0B1526; border: 1px solid #2A3D5F;
+  color: var(--muted); font-size: 17px; line-height: 1;
+}
+
+/* ---- 报错横幅 ---- */
+#banner {
+  display: none; padding: 10px 14px; font-size: 14px; line-height: 1.45;
+  border-bottom: 1px solid transparent;
+}
+#banner.net { display: block; background: #3A2C10; color: var(--warn); border-color: #5A4620; }
+#banner.uid { display: block; background: #3A1616; color: #F1A0A0; border-color: #5E2626; }
+
+/* ---- 主区 ---- */
+main { padding: 12px 12px 0; max-width: 560px; margin: 0 auto; }
+section { margin-bottom: 14px; }
+
+/* ---- 题卡 ---- */
+.qcard {
+  background: var(--card); border: 1px solid #23375C;
+  border-radius: var(--radius); padding: 14px; margin-bottom: 12px;
+}
+.qcard.fresh { animation: glow 1.6s ease-out 2; }
+@keyframes glow {
+  0%   { box-shadow: 0 0 0 0 rgba(250,199,117,.75); }
+  100% { box-shadow: 0 0 0 14px rgba(250,199,117,0); }
+}
+.qhead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.qtag {
+  font-size: 12px; font-weight: 700; color: var(--muted);
+  background: #0B1526; border-radius: 6px; padding: 3px 8px;
+}
+.qcountdown { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--warn); }
+.qcountdown.low { color: var(--danger); }
+.qtool { font-size: 17px; font-weight: 700; margin: 2px 0 6px; word-break: break-all; }
+.qtext { font-size: 15px; color: #D7E1F2; line-height: 1.5; word-break: break-all; white-space: pre-wrap; }
+.qbar { height: 3px; border-radius: 2px; background: #0B1526; margin: 10px 0 12px; overflow: hidden; }
+.qbar > div { height: 100%; background: var(--warn); transition: width 1s linear; }
+
+.btnrow { display: flex; gap: 10px; margin-top: 4px; }
+.bigbtn {
+  flex: 1; padding: 15px 8px; border-radius: 12px;
+  font-size: 17px; font-weight: 800;
+}
+.bigbtn.allow { background: var(--ok); color: #05231A; }
+.bigbtn.deny  { background: #2A1B1B; color: var(--danger); border: 1px solid #5E2626; }
+
+.optbtn {
+  display: block; width: 100%; text-align: left;
+  background: #0F1E38; border: 1px solid #2A3D5F; border-radius: 11px;
+  padding: 13px 14px; margin-bottom: 9px; font-size: 15.5px; font-weight: 600;
+}
+.optbtn .num { color: var(--ok); font-weight: 800; margin-right: 9px; }
+.quickrow { display: flex; gap: 9px; margin: 2px 0 10px; }
+.quickbtn {
+  flex: 1; background: #0B1526; border: 1px dashed #3A537F; border-radius: 999px;
+  padding: 10px 8px; font-size: 14px; color: var(--warn); font-weight: 600;
+}
+.freerow { display: flex; gap: 8px; align-items: stretch; }
+.freerow input { flex: 1; }
+.sendbtn {
+  background: var(--ok); color: #05231A; font-weight: 800;
+  border-radius: 10px; padding: 0 18px; font-size: 15px;
+}
+.charcnt { font-size: 12px; color: var(--muted); text-align: right; margin-top: 4px; }
+.qcard button:disabled { opacity: .45; }
+
+/* ---- 双机胶囊 ---- */
+.chips { display: flex; gap: 10px; margin-bottom: 12px; }
+.chip {
+  flex: 1; display: flex; align-items: center; gap: 8px; justify-content: center;
+  background: var(--card); border: 1px solid #23375C; border-radius: 999px;
+  padding: 11px 10px; font-weight: 800; font-size: 15px; letter-spacing: 1px;
+}
+.chip .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.chip .st { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+.chip.selected { border-color: var(--ok); }
+.chip.offline { color: var(--muted); }
+.chip.offline .dot { background: #3A4A63; }
+
+/* ---- 状态卡 ---- */
+.scard {
+  background: var(--card); border: 1px solid #23375C;
+  border-radius: var(--radius); padding: 16px 16px 14px;
+}
+.scard .rowtop { display: flex; align-items: baseline; gap: 10px; }
+.scard .owner { color: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+.scard .state { font-size: 21px; font-weight: 800; }
+.scard .elapsed { margin-left: auto; font-size: 15px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scard .gmsg {
+  margin: 10px 0 4px; font-size: 14.5px; color: #D7E1F2; line-height: 1.5;
+  min-height: 22px; word-break: break-all;
+}
+.meter { margin-top: 10px; }
+.meter .lab {
+  display: flex; justify-content: space-between;
+  font-size: 12.5px; color: var(--muted); margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.meter .track { height: 7px; border-radius: 4px; background: #0B1526; overflow: hidden; }
+.meter .fill { height: 100%; background: var(--ok); border-radius: 4px; transition: width .4s; }
+.scard.offline .state, .scard.offline .fill { color: var(--muted); }
+.scard.offline .fill { background: #3A4A63; }
+.offlab { display: none; margin-top: 10px; color: var(--warn); font-weight: 700; font-size: 14px; }
+.scard.offline .offlab { display: block; }
+
+/* ---- 诊断行 ---- */
+#diag {
+  font-size: 12px; color: #55688A; padding: 4px 2px 0; line-height: 1.6;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+#diag button {
+  background: none; color: var(--muted); text-decoration: underline;
+  padding: 0; font-size: 12px;
+}
+
+/* ---- 设置页 ---- */
+#viewSettings { display: none; }
+body.settings #viewSettings { display: block; }
+body.settings #viewMain { display: none; }
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 13.5px; color: var(--muted); margin-bottom: 6px; }
+.field .hint { font-size: 12px; color: #55688A; margin-top: 5px; line-height: 1.5; }
+.savebtn {
+  width: 100%; padding: 15px; border-radius: 12px; margin-top: 4px;
+  background: var(--ok); color: #05231A; font-size: 17px; font-weight: 800;
+}
+.settings-title { font-size: 16px; font-weight: 800; margin: 6px 0 16px; }
+
+/* ---- toast ---- */
+#toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: #1B2F52; color: var(--text); border: 1px solid #3A537F;
+  border-radius: 999px; padding: 10px 18px; font-size: 14px;
+  opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 50;
+  max-width: 86vw; text-align: center;
+}
+#toast.show { opacity: 1; }
+.empty { color: #3D4F6E; font-size: 13.5px; text-align: center; padding: 6px 0 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AgDash</h1>
+  <button class="pill" id="modePill" title="远程模式总闸">控 ?</button>
+  <button class="iconbtn" id="gearBtn" title="设置">&#9881;</button>
+</header>
+
+<div id="banner"></div>
+
+<main id="viewMain">
+  <section id="qArea"></section>
+  <section>
+    <div class="chips" id="chips"></div>
+    <div class="scard" id="scard"></div>
+  </section>
+  <div id="diag"></div>
+</main>
+
+<main id="viewSettings">
+  <div class="settings-title">首次设置 / 连接参数</div>
+  <div class="field">
+    <label for="fUid">巴法云 UID（私钥，只存本机 localStorage）</label>
+    <input id="fUid" autocomplete="off" autocapitalize="off" spellcheck="false"
+           placeholder="例：32 位私钥串">
+    <div class="hint">与 collector / 板子共用同一 UID。本页面与代码仓库均不保存该值。</div>
+  </div>
+  <div class="field">
+    <label for="fNtfy">ntfy 主题名（锁屏推送，选填）</label>
+    <input id="fNtfy" autocomplete="off" autocapitalize="off" spellcheck="false"
+           placeholder="随机长主题名，如 agdash-xxxxxxxx">
+    <div class="hint">在手机 ntfy App 订阅同名主题；collector 配置 [remote] ntfy_topic
+      需填同一值。本页仅保存名称用于备忘，推送由 collector 发起。</div>
+  </div>
+  <div class="field">
+    <label for="fTopicStatus">状态主题</label>
+    <input id="fTopicStatus" autocomplete="off" autocapitalize="off" spellcheck="false">
+  </div>
+  <div class="field">
+    <label for="fTopicCtl">控制主题</label>
+    <input id="fTopicCtl" autocomplete="off" autocapitalize="off" spellcheck="false">
+  </div>
+  <button class="savebtn" id="saveBtn">保存并连接</button>
+</main>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* =====================================================================
+ * B4 手机网页端（单文件，零依赖）——对接契约以 collector 真实用法为准：
+ *
+ *  发布   POST https://apis.bemfa.com/va/postJsonMsg
+ *         body {"uid":UID,"topic":TOPIC,"type":1,"msg":FRAME}
+ *         成功判据 resp.code===0（collector/src/collector/ctl_channel.py
+ *         publish() / bemfa.py publish() 同姿态；超时 8s）
+ *  最新   GET  https://apis.bemfa.com/va/alltopic?uid=UID&type=1
+ *         resp {"code":0,"data":[{"topic":..,"msg":..,"time":..,"unix":?},..]}
+ *         每主题只有最新一条（ctl_channel.fetch_new / watch_topic.py）。
+ *         历史拉取接口对 HTTP/MQTT 发布的帧均不可见（批次一 T0 两次实证，
+ *         phase4 计划期改判）——本页不再拉历史重建序列，只消费 alltopic 末消息。
+ *
+ *  下行帧（collector ctl_channel.py 构造，键序即字面序）：
+ *    W  {"o":"W","m":M,"i":N,"x":tool,"h":header,"g":question,
+ *        "p":[全文选项,..≤4],"k":[快捷,..≤2],"a":remain}
+ *       v1.2 镜像帧，本页主消费形态：p 空数组=权限题(y/n)；
+ *       p 非空=选择题(全文选项+快捷+自由文字)，一帧装全不再需要配对。
+ *    q  {"o":"q","m":M,"i":N,"x":tool,"g":detail,"a":remain}
+ *       批次一权限题帧；collector 对权限题先发 q 再发 W，本页仅在 W 到达前
+ *       的竞态窗口内用它兜底开权限卡（与 W 共享 (m,i) 判重键，先到者开卡）。
+ *    r  {"o":"r","m":M,"i":N}                             题目转移/超时收回
+ *    Q/P/C 三帧（选择题预告/选项/快捷配置，v1.1）为固件小屏消费协议，本页
+ *    不解析，遇到直接忽略（W 帧已经把它们的信息一次装全）。
+ *  上行帧（本页构造，与批次一/二字面逐字一致）：
+ *    a  {"o":"a","m":M,"i":N,"r":"y|n|1..4|k1|k2"}
+ *    t  {"o":"t","m":M,"i":N,"x":"自由文字"}   x ≤100 字符（v1.2 新增）
+ *    m  {"o":"m","v":0|1}
+ *  状态帧（collector payload.py）：
+ *    d  {"v":2,"m":"w|m","s":"r|w|d|i","e":s,"d":n,"t":n,"q":-1,"c":%,"r":%,"g":msg}
+ * ===================================================================== */
+
+/* ---------------------------------------------------------------
+ * §1 常量与配置（localStorage；页面零硬编码密钥）
+ * --------------------------------------------------------------- */
+const API_BASE   = 'https://apis.bemfa.com/va';
+const POST_TIMEOUT_MS = 8000;   // 对齐 ctl_channel.POST_TIMEOUT_S
+const GET_TIMEOUT_MS  = 5000;   // 对齐 ctl_channel.GET_TIMEOUT_S
+const IDLE_POLL_MS    = 5000;   // 规格 §2
+const BUSY_POLL_MS    = 1500;   // 规格 §2
+const BACKOFF_MAX_MS  = 30000;  // 规格 §2/§7
+const OFFLINE_MS      = 90000;  // 手机页专用灰化阈值（spec §10 裁决⑥：独立于
+                                 // 固件 model.h 常数取值，容忍页面轮询节奏+
+                                 // 网络时延，双机遮蔽以手机可见帧计）
+const TEXT_MAX_CHARS  = 100;    // 规格 §3（collector 侧再钳 [:100] 双层防御）
+const RESOLVED_TTL_MS = 600000; // 去重游标 10min 过期（qid mod 100 复用防误伤）
+// 已知边界（复审记录，仅注释不改逻辑）：collector 重启会把 _next_qid 归零，
+// 若重启后 10 分钟内又对同一 machine 发出 qid=0 的新题，且该 qid 恰好在
+// 这 10 分钟窗口内被 resolve 过（isResolved 仍命中），新题会被去重游标
+// 静默吞掉——不出卡、不提示。三条件（重启 + qid 复用 + 落在 TTL 窗口内）
+// 需同时成立才触发，取舍：TTL 去重机制沿用批次一既有设计，不为此引入
+// generation/重启代次标记（成本与收益不成正比）。可观测症状：某题该出
+// 卡却没出现；页面无专门清除入口，可清本站点浏览器 localStorage
+// （即清空 LS_RESOLVED 游标），或等 TTL 自然过期（≤10 分钟）后下一次
+// 同 qid 再来即可正常出卡。
+const SEEN_RAW_CAP    = 300;
+const LS_CFG      = 'agdash.cfg';
+const LS_RESOLVED = 'agdash.resolved';
+
+const DEFAULT_CFG = {
+  uid: '',                    // 必填，首次进设置页
+  ntfy: '',                   // 选填，仅备忘
+  topicStatus: 'agdash01',    // collector config.py 默认值
+  topicCtl: 'agdashctl01'     // collector config.py 默认值
+};
+
+function loadCfg() {
+  try {
+    const raw = localStorage.getItem(LS_CFG);
+    if (!raw) return Object.assign({}, DEFAULT_CFG);
+    return Object.assign({}, DEFAULT_CFG, JSON.parse(raw));
+  } catch (e) { return Object.assign({}, DEFAULT_CFG); }
+}
+function saveCfg(c) { localStorage.setItem(LS_CFG, JSON.stringify(c)); }
+
+let cfg = loadCfg();
+
+/* ---------------------------------------------------------------
+ * §2 全局运行态
+ * --------------------------------------------------------------- */
+const S = {
+  machines: {},          // 'w'/'m' -> {frame:{}, lastRxMs}
+  sel: null,             // 胶囊锁定选择（null=自动）
+  mode: null,            // null=未知, true/false=最近一帧 m 的 v
+  modePending: false,
+  questions: new Map(),  // key "m:i" -> question 对象（含每题自带 quick）
+  seenRaw: new Map(),    // 原始 msg 串去重环（Map 保序当 LRU 用）
+  resolved: new Map(),   // "m:i" -> ts，去重游标（防重复出题，持久化）
+  failCount: 0,          // 连续网络失败次数（指数退避）
+  lastErr: null,         // {kind:'net'|'uid', detail}
+  lastPollAt: 0,
+  pollTimer: 0,
+  polling: false,
+  audioCtx: null,
+  sending: false
+};
+
+/* 持久化去重游标：跨刷新防已答/已转移的题重新弹出 */
+function loadResolved() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(LS_RESOLVED) || '[]');
+    const now = Date.now();
+    for (const it of arr) {
+      if (it && it.k && now - it.t < RESOLVED_TTL_MS) S.resolved.set(it.k, it.t);
+    }
+  } catch (e) { /* 空游标起步 */ }
+}
+function persistResolved() {
+  const now = Date.now();
+  const arr = [];
+  for (const [k, t] of S.resolved) {
+    if (now - t < RESOLVED_TTL_MS) arr.push({ k: k, t: t });
+  }
+  localStorage.setItem(LS_RESOLVED, JSON.stringify(arr.slice(-48)));
+}
+function markResolved(key) {
+  S.resolved.set(key, Date.now());
+  persistResolved();
+}
+function isResolved(key) {
+  const t = S.resolved.get(key);
+  if (t === undefined) return false;
+  if (Date.now() - t >= RESOLVED_TTL_MS) { S.resolved.delete(key); return false; }
+  return true;
+}
+
+function rememberRaw(msg) {
+  if (S.seenRaw.has(msg)) S.seenRaw.delete(msg);
+  S.seenRaw.set(msg, 1);
+  while (S.seenRaw.size > SEEN_RAW_CAP) {
+    S.seenRaw.delete(S.seenRaw.keys().next().value);
+  }
+}
+
+/* ---------------------------------------------------------------
+ * §3 工具函数
+ * --------------------------------------------------------------- */
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function clampChars(s, n) {           // 按 Unicode 码点截断（对齐 Python len 语义）
+  const cps = Array.from(String(s));
+  return cps.length <= n ? String(s) : cps.slice(0, n).join('');
+}
+function fmtElapsed(sec) {
+  sec = Math.max(0, sec | 0);
+  if (sec < 3600) {
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+  return Math.floor(sec / 3600) + 'h' +
+         String(Math.floor(sec % 3600 / 60)).padStart(2, '0') + 'm';
+}
+function qKey(machine, qid) { return machine + ':' + qid; }
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(function () { el.classList.remove('show'); }, 2600);
+}
+
+/* ---------------------------------------------------------------
+ * §4 巴法云 API 层（fetch + AbortController 超时）
+ * --------------------------------------------------------------- */
+async function bemfaGet(path, params) {
+  const q = new URLSearchParams(params).toString();
+  const ac = new AbortController();
+  const timer = setTimeout(function () { ac.abort(); }, GET_TIMEOUT_MS);
+  try {
+    const resp = await fetch(API_BASE + path + '?' + q, { signal: ac.signal });
+    return await resp.json();     // 非 JSON → 抛错 → 上层按网络错误处理
+  } finally { clearTimeout(timer); }
+}
+
+/* 发布一帧到控制主题；成功判据 code===0（与 collector publish 一致） */
+async function bemfaPublish(frame) {
+  const body = { uid: cfg.uid, topic: cfg.topicCtl, type: 1, msg: frame };
+  const ac = new AbortController();
+  const timer = setTimeout(function () { ac.abort(); }, POST_TIMEOUT_MS);
+  try {
+    const resp = await fetch(API_BASE + '/postJsonMsg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ac.signal
+    });
+    const doc = await resp.json();
+    if (doc && doc.code === 0) {
+      rememberRaw(frame);           // 自己发的帧回声进 alltopic，先记游标吞掉
+      return true;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  } finally { clearTimeout(timer); }
+}
+
+async function apiAllTopic() {
+  return bemfaGet('/alltopic', { uid: cfg.uid, type: 1 });
+}
+
+/* ---------------------------------------------------------------
+ * §5 控制帧解析（对齐 collector parse_ctl_frame 的宽容度，
+ *     页面实际消费 W/q/r，并旁观 a/t/m 做去重与模式同步；
+ *     Q/P/C 等固件小屏专用帧仅解析出 op 后即被 §6 忽略）
+ * --------------------------------------------------------------- */
+function parseFrame(text) {
+  let doc;
+  try { doc = JSON.parse(text); } catch (e) { return null; }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return null;
+  if (typeof doc.o !== 'string') return null;
+  return doc;
+}
+function frameMachine(doc) {
+  return (typeof doc.m === 'string' && doc.m) ? doc.m.charAt(0) : '';
+}
+function frameQid(doc) {
+  const n = Number(doc.i);
+  return Number.isInteger(n) ? n : -1;
+}
+
+/* ---------------------------------------------------------------
+ * §6 控制帧吸收（alltopic 每主题只给最新一条，单帧处理即可，
+ *     无需历史批量两遍序——op 分派：W/q 出题，a/r 收卡，
+ *     m 同步模式，其余（Q/P/C 等固件小屏专用帧）忽略）
+ * --------------------------------------------------------------- */
+function ingestCtlLast(msg, unixTs) {
+  if (typeof msg !== 'string' || !msg) return;
+  if (S.seenRaw.has(msg)) return;             // 与上次相同的末消息：跳过重复处理
+  rememberRaw(msg);
+  const doc = parseFrame(msg);
+  if (!doc) return;
+  switch (doc.o) {
+    case 'W':
+      applyWebFrame(doc, unixTs);
+      break;
+    case 'q':
+      applyQFrame(doc, unixTs);
+      break;
+    case 'm': {
+      const v = Number(doc.v);
+      if (v === 0 || v === 1) applyModeFrame(v === 1);
+      break;
+    }
+    case 'r': {
+      const key = qKey(frameMachine(doc), frameQid(doc));
+      markResolved(key);
+      closeQuestion(key, '已转回电脑');
+      break;
+    }
+    case 'a':
+    case 't': {
+      const key = qKey(frameMachine(doc), frameQid(doc));
+      markResolved(key);
+      closeQuestion(key, '他端已作答');
+      break;
+    }
+    default:
+      break;                                  // Q/P/C：固件小屏专用帧，本页不解析
+  }
+}
+
+function applyModeFrame(on) {
+  S.mode = on;
+  S.modePending = false;
+  if (!on) {
+    /* 模式转关：清全部在途题（对齐固件转关沿清题语义） */
+    for (const key of Array.from(S.questions.keys())) {
+      closeQuestion(key, '「控」已关，题已收起');
+    }
+  }
+  renderModePill();
+}
+
+/* 出题公共落地：由 applyWebFrame/applyQFrame 在各自判重通过后调用 */
+function openQuestion(opts) {
+  const key = qKey(opts.machine, opts.qid);
+  const options = (Array.isArray(opts.options) && opts.options.length) ? opts.options : null;
+  const remainTotal = Math.max(1, Math.round((opts.deadline - Date.now()) / 1000));
+  S.questions.set(key, {
+    key: key, machine: opts.machine, qid: opts.qid,
+    kind: options ? 'ask' : 'perm',
+    tool: String(opts.tool || ''),
+    header: String(opts.header || ''),
+    text: String(opts.question || ''),
+    options: options,
+    quick: Array.isArray(opts.quick) ? opts.quick : [],
+    remainTotal: remainTotal,
+    deadlineMs: opts.deadline,
+    freshUntil: Date.now() + 4000
+  });
+  renderQuestions();
+}
+
+// W 镜像帧 → 题卡。p 空数组=权限题(y/n 两大键); 非空=选择题(选项+快捷+文字)。
+// 剩余秒 = 帧内 a - (本机当前时间 - alltopic item.unix)，负数拒收(过期题)。
+function applyWebFrame(doc, unixTs) {
+  const machine = frameMachine(doc);
+  const qid = frameQid(doc);
+  if (!machine || qid < 0 || qid > 99) return;
+  const key = qKey(machine, qid);
+  if (isResolved(key)) return;                 // 已答/已收卡: 去重
+  if (S.questions.has(key)) return;             // 在卡判重(复审 M6): q 先开卡时
+                                                 // W 后到不得重置倒计时/重复响铃
+  const elapsed = unixTs ? Math.max(0, Math.floor(Date.now() / 1000) - unixTs) : 0;
+  const remain = (doc.a | 0) - elapsed;
+  if (remain <= 0) return;                      // 过期题不出卡
+  openQuestion({
+    machine: machine,
+    qid: qid,
+    tool: String(doc.x || ''),
+    header: String(doc.h || ''),
+    question: String(doc.g || ''),
+    options: Array.isArray(doc.p) ? doc.p.map(String).slice(0, 4) : [],
+    quick: Array.isArray(doc.k) ? doc.k.map(String).slice(0, 2) : [],
+    deadline: Date.now() + remain * 1000
+  });
+  alertNewQuestion();
+}
+
+// q 帧（批次一权限题字面）：仅在 W 到达前的竞态窗口内兜底开权限卡——
+// collector 对权限题先发 q 再发 W，二者 (m,i) 相同，先到者开卡、
+// 后到者被 isResolved/在卡判重挡下，无需额外协调。elapsed/remain 计算
+// 与 applyWebFrame 同款（复审 Minor：由 q 开卡后同 key 的 W 会被在卡
+// 判重挡下，此卡再无机会被更精确的 unix-elapsed 纠正，故两路必须对称）。
+function applyQFrame(doc, unixTs) {
+  const machine = frameMachine(doc);
+  const qid = frameQid(doc);
+  if (!machine || qid < 0 || qid > 99) return;
+  const key = qKey(machine, qid);
+  if (isResolved(key)) return;
+  if (S.questions.has(key)) return;
+  const elapsed = unixTs ? Math.max(0, Math.floor(Date.now() / 1000) - unixTs) : 0;
+  const remain = (doc.a | 0) - elapsed;
+  if (remain <= 0) return;
+  openQuestion({
+    machine: machine,
+    qid: qid,
+    tool: String(doc.x || ''),
+    header: '',
+    question: String(doc.g || ''),
+    options: [],
+    quick: [],
+    deadline: Date.now() + remain * 1000
+  });
+  alertNewQuestion();
+}
+
+function closeQuestion(key, reason) {
+  if (!S.questions.has(key)) return;
+  S.questions.delete(key);
+  renderQuestions();
+  if (reason) toast(reason);
+}
+
+/* ---------------------------------------------------------------
+ * §7 状态主题吸收（d 帧，collector payload.py 形状）
+ * --------------------------------------------------------------- */
+function ingestStatus(msg) {
+  if (S.seenRaw.has('S|' + msg)) return;      // 状态帧独立命名空间去重
+  rememberRaw('S|' + msg);
+  let doc;
+  try { doc = JSON.parse(msg); } catch (e) { return; }
+  if (!doc || typeof doc !== 'object') return;
+  const mid = (typeof doc.m === 'string' && doc.m) ? doc.m.charAt(0) : '';
+  if (mid !== 'w' && mid !== 'm') return;
+  S.machines[mid] = {
+    frame: {
+      state: (typeof doc.s === 'string' && 'rwdi'.indexOf(doc.s) >= 0) ? doc.s : 'i',
+      elapsed: Math.max(0, Number(doc.e) | 0),
+      done: Math.max(0, Number(doc.d) | 0),
+      total: Math.max(0, Number(doc.t) | 0),
+      cpu: Math.max(0, Math.min(100, Number(doc.c) | 0)),
+      ram: Math.max(0, Math.min(100, Number(doc.r) | 0)),
+      msg: String(doc.g || '')
+    },
+    lastRxMs: Date.now()
+  };
+}
+
+function machineOffline(mid) {
+  const mv = S.machines[mid];
+  return !mv || (Date.now() - mv.lastRxMs) > OFFLINE_MS;
+}
+
+/* 自动选中：锁定优先；否则 等待中且在线 > 运行中且在线 > 最近有帧 > 'w' */
+function selectedMachine() {
+  if (S.sel && S.machines[S.sel]) return S.sel;
+  const ids = ['w', 'm'];
+  for (const id of ids) {
+    const mv = S.machines[id];
+    if (mv && mv.frame.state === 'w' && !machineOffline(id)) return id;
+  }
+  for (const id of ids) {
+    const mv = S.machines[id];
+    if (mv && mv.frame.state === 'r' && !machineOffline(id)) return id;
+  }
+  let best = null;
+  for (const id of ids) {
+    const mv = S.machines[id];
+    if (mv && (!best || mv.lastRxMs > S.machines[best].lastRxMs)) best = id;
+  }
+  return best || 'w';
+}
+
+/* ---------------------------------------------------------------
+ * §8 轮询引擎：空闲 5s / 忙 1.5s / 指数退避≤30s
+ * --------------------------------------------------------------- */
+function busy() { return S.questions.size > 0; }
+
+function baseInterval() {
+  return busy() ? BUSY_POLL_MS : IDLE_POLL_MS;
+}
+function nextDelay() {
+  if (S.failCount === 0) return baseInterval();
+  const d = baseInterval() * Math.pow(2, S.failCount);
+  return Math.min(BACKOFF_MAX_MS, d);
+}
+function schedulePoll(delayMs) {
+  clearTimeout(S.pollTimer);
+  S.pollTimer = setTimeout(pollOnce, delayMs);
+}
+
+async function pollOnce() {
+  if (S.polling || !cfg.uid) return;
+  S.polling = true;
+  let netOk = false;
+  try {
+    /* alltopic 一次请求同时取出两主题末消息（状态帧 + 控制帧，不再拉历史） */
+    const all = await apiAllTopic();
+    if (all && typeof all === 'object' && all.code === 0) {
+      netOk = true;
+      S.lastErr = null;
+      for (const item of (Array.isArray(all.data) ? all.data : [])) {
+        if (!item || typeof item !== 'object') continue;
+        if (item.topic === cfg.topicStatus && typeof item.msg === 'string') {
+          ingestStatus(item.msg);
+        } else if (item.topic === cfg.topicCtl && typeof item.msg === 'string') {
+          const u = Number(item.unix);          // 复审 I3：unix 字段真机实态未定
+          ingestCtlLast(item.msg, Number.isFinite(u) && u > 0 ? u : 0);
+        }
+      }
+    } else if (all && typeof all === 'object' && typeof all.code === 'number') {
+      /* HTTP 通了但业务拒绝：多半 UID 错（规格 §7 显式报错） */
+      S.lastErr = { kind: 'uid', detail: 'code=' + all.code +
+        (all.msg ? ' ' + String(all.msg) : '') };
+    } else {
+      S.lastErr = { kind: 'net', detail: '响应无法解析' };
+    }
+  } catch (e) {
+    S.lastErr = { kind: 'net', detail: '' };
+  }
+  S.failCount = netOk ? 0 : S.failCount + 1;
+  S.lastPollAt = Date.now();
+  S.polling = false;
+  renderBanner();
+  renderDashboard();
+  renderDiag();
+  schedulePoll(nextDelay());
+}
+
+/* ---------------------------------------------------------------
+ * §9 上行帧构造与发送（字面与批次一/二逐字一致；键序=插入序）
+ * --------------------------------------------------------------- */
+function buildAnswerFrame(machine, qid, rcode) {
+  return JSON.stringify({ o: 'a', m: machine, i: qid, r: rcode });
+}
+function buildTextFrame(machine, qid, text) {
+  return JSON.stringify({ o: 't', m: machine, i: qid, x: text });
+}
+function buildModeFrame(on) {
+  return JSON.stringify({ o: 'm', v: on ? 1 : 0 });
+}
+
+async function sendAnswer(q, rcode) {
+  if (S.sending) return;
+  S.sending = true;
+  setCardDisabled(q.key, true);
+  const ok = await bemfaPublish(buildAnswerFrame(q.machine, q.qid, rcode));
+  S.sending = false;
+  if (ok) {
+    markResolved(q.key);
+    closeQuestion(q.key, '已作答');
+    schedulePoll(300);                        // 尽快看到回执/下一题
+  } else {
+    setCardDisabled(q.key, false);
+    toast('发送失败，请重试');
+  }
+}
+
+async function sendText(q, text) {
+  const clean = clampChars(text.replace(/[\u0000-\u001F\u007F]/g, ''), TEXT_MAX_CHARS).trim();
+  if (!clean) { toast('请输入内容'); return; }
+  if (S.sending) return;
+  S.sending = true;
+  setCardDisabled(q.key, true);
+  const ok = await bemfaPublish(buildTextFrame(q.machine, q.qid, clean));
+  S.sending = false;
+  if (ok) {
+    markResolved(q.key);
+    closeQuestion(q.key, '文字已发送');
+    schedulePoll(300);
+  } else {
+    setCardDisabled(q.key, false);
+    toast('发送失败，请重试');
+  }
+}
+
+async function sendMode(on) {
+  if (S.modePending) return;
+  S.modePending = true;
+  renderModePill();
+  const ok = await bemfaPublish(buildModeFrame(on));
+  if (ok) {
+    S.mode = on;                              // 乐观更新，后续 m 帧回声再校准
+    if (!on) applyModeFrame(false);           // 关沿本地同样清题
+    toast(on ? '「控」已开' : '「控」已关');
+  } else {
+    toast('模式帧发送失败');
+  }
+  S.modePending = false;
+  renderModePill();
+}
+
+function setCardDisabled(key, dis) {
+  const el = document.querySelector('.qcard[data-key="' + CSS.escape(key) + '"]');
+  if (!el) return;
+  el.querySelectorAll('button, input').forEach(function (b) { b.disabled = dis; });
+}
+
+/* ---------------------------------------------------------------
+ * §10 来题提醒：WebAudio 蜂鸣 + 振动 + 置顶高亮
+ * --------------------------------------------------------------- */
+function ensureAudio() {
+  if (S.audioCtx) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) S.audioCtx = new AC();
+  } catch (e) { /* 无音频能力则静默 */ }
+}
+/* 移动端自动播放策略：首次用户手势时解锁 AudioContext */
+document.addEventListener('pointerdown', function unlock() {
+  ensureAudio();
+  if (S.audioCtx && S.audioCtx.state === 'suspended') S.audioCtx.resume();
+  document.removeEventListener('pointerdown', unlock);
+});
+
+function beep() {
+  const ctx = S.audioCtx;
+  if (!ctx || ctx.state !== 'running') return;
+  const t0 = ctx.currentTime;
+  [0, 0.22].forEach(function (off) {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, t0 + off);
+    g.gain.exponentialRampToValueAtTime(0.28, t0 + off + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.16);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0 + off);
+    osc.stop(t0 + off + 0.18);
+  });
+}
+function alertNewQuestion() {
+  beep();
+  if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  updateTitle();
+}
+function updateTitle() {
+  document.title = (S.questions.size ? '(' + S.questions.size + '题) ' : '') + 'AgDash 手机端';
+}
+
+/* ---------------------------------------------------------------
+ * §11 渲染：报错横幅 / 模式胶囊 / 题卡 / 仪表盘 / 诊断行
+ * --------------------------------------------------------------- */
+function renderBanner() {
+  const el = document.getElementById('banner');
+  if (!S.lastErr) { el.className = ''; el.textContent = ''; return; }
+  if (S.lastErr.kind === 'uid') {
+    el.className = 'uid';
+    el.textContent = '巴法云拒绝请求（' + S.lastErr.detail + '）——请检查 UID 与主题名（设置页）';
+  } else {
+    const wait = Math.round(nextDelay() / 1000);
+    el.className = 'net';
+    el.textContent = '网络异常（连续 ' + S.failCount + ' 次失败），' + wait + 's 后重试…';
+  }
+}
+
+function renderModePill() {
+  const el = document.getElementById('modePill');
+  el.classList.toggle('pending', S.modePending);
+  if (S.mode === true) { el.textContent = '控 开'; el.className = 'pill on' + (S.modePending ? ' pending' : ''); }
+  else if (S.mode === false) { el.textContent = '控 关'; el.className = 'pill off' + (S.modePending ? ' pending' : ''); }
+  else { el.textContent = '控 ?'; el.className = 'pill' + (S.modePending ? ' pending' : ''); }
+}
+
+function cardCountdownHtml(q) {
+  const remain = Math.max(0, Math.ceil((q.deadlineMs - Date.now()) / 1000));
+  const pct = q.remainTotal > 0 ? Math.round(remain * 100 / q.remainTotal) : 0;
+  return '<span class="qcountdown' + (remain <= 10 ? ' low' : '') + '" data-cd>剩 ' +
+         remain + 's</span>|<div class="qbar"><div data-cdbar style="width:' + pct + '%"></div></div>';
+}
+
+function renderQuestions() {
+  const area = document.getElementById('qArea');
+  const parts = [];
+  for (const q of S.questions.values()) {
+    const cd = cardCountdownHtml(q).split('|');
+    const mName = q.machine === 'm' ? 'MAC' : 'WIN';
+    let body = '';
+    if (q.kind === 'perm') {
+      body =
+        '<div class="qtool">' + esc(q.tool || '权限请求') + '</div>' +
+        (q.text ? '<div class="qtext">' + esc(q.text) + '</div>' : '') +
+        cd[1] +
+        '<div class="btnrow">' +
+          '<button class="bigbtn allow" data-act="allow">允许</button>' +
+          '<button class="bigbtn deny" data-act="deny">拒绝</button>' +
+        '</div>';
+    } else {
+      // W 帧一帧装全选项，q.options 恒为非空数组（选择题分支保证，见 openQuestion）
+      const opts = (q.options || []).map(function (lab, idx) {
+        return '<button class="optbtn" data-act="opt" data-n="' + (idx + 1) + '">' +
+               '<span class="num">' + (idx + 1) + '</span>' + esc(lab) + '</button>';
+      }).join('');
+      let quick = '';
+      if (q.quick && q.quick.length) {
+        quick = '<div class="quickrow">' + q.quick.map(function (kLab, i) {
+          return '<button class="quickbtn" data-act="quick" data-n="' + (i + 1) + '">' +
+                 esc(kLab) + '</button>';
+        }).join('') + '</div>';
+      }
+      body =
+        (q.header ? '<div class="qtool">' + esc(q.header) + '</div>' : '') +
+        (q.text ? '<div class="qtext">' + esc(q.text) + '</div>' : '') +
+        cd[1] + opts + quick +
+        '<div class="freerow">' +
+          '<input data-free maxlength="200" placeholder="自由文字（≤100 字）"' +
+          ' autocomplete="off" enterkeyhint="send">' +
+          '<button class="sendbtn" data-act="text">发送</button>' +
+        '</div>' +
+        '<div class="charcnt" data-cnt>0 / ' + TEXT_MAX_CHARS + '</div>';
+    }
+    parts.push(
+      '<div class="qcard' + (Date.now() < q.freshUntil ? ' fresh' : '') + '" data-key="' + esc(q.key) + '">' +
+        '<div class="qhead"><span class="qtag">' + mName + ' · #' + q.qid + '</span>' +
+        '<span class="qtag">' + (q.kind === 'perm' ? '权限' : '选择') + '</span>' + cd[0] + '</div>' +
+        body +
+      '</div>');
+  }
+  area.innerHTML = parts.length ? parts.join('')
+    : '<div class="empty">暂无待答问题</div>';
+  updateTitle();
+}
+
+/* 题卡事件委托：一处绑定，重渲染不丢 */
+document.getElementById('qArea').addEventListener('click', function (ev) {
+  const btn = ev.target.closest('button');
+  if (!btn) return;
+  const card = ev.target.closest('.qcard');
+  if (!card) return;
+  const q = S.questions.get(card.getAttribute('data-key'));
+  if (!q) return;
+  const act = btn.getAttribute('data-act');
+  if (act === 'allow') sendAnswer(q, 'y');
+  else if (act === 'deny') sendAnswer(q, 'n');
+  else if (act === 'opt') sendAnswer(q, String(btn.getAttribute('data-n')));
+  else if (act === 'quick') sendAnswer(q, 'k' + btn.getAttribute('data-n'));
+  else if (act === 'text') {
+    const inp = card.querySelector('[data-free]');
+    sendText(q, inp ? inp.value : '');
+  }
+});
+document.getElementById('qArea').addEventListener('input', function (ev) {
+  if (!ev.target.matches('[data-free]')) return;
+  const card = ev.target.closest('.qcard');
+  const n = Array.from(ev.target.value).length;
+  const cnt = card.querySelector('[data-cnt]');
+  if (cnt) {
+    cnt.textContent = Math.min(n, TEXT_MAX_CHARS) + ' / ' + TEXT_MAX_CHARS +
+      (n > TEXT_MAX_CHARS ? '（超出部分将被截断）' : '');
+  }
+});
+document.getElementById('qArea').addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter' && ev.target.matches('[data-free]')) {
+    ev.preventDefault();
+    const card = ev.target.closest('.qcard');
+    const q = S.questions.get(card.getAttribute('data-key'));
+    if (q) sendText(q, ev.target.value);
+  }
+});
+
+const STATE_META = {
+  r: { text: '运行中',  color: 'var(--ok)' },
+  w: { text: '等待回答', color: 'var(--warn)' },
+  d: { text: '已完成',  color: 'var(--ok)' },
+  i: { text: '空闲',    color: 'var(--muted)' }
+};
+
+function renderDashboard() {
+  /* 胶囊：固定 WIN/MAC 两枚（对齐固件顶栏），离线整枚灰化 */
+  const chips = document.getElementById('chips');
+  const sel = selectedMachine();
+  chips.innerHTML = ['w', 'm'].map(function (id) {
+    const mv = S.machines[id];
+    const off = machineOffline(id);
+    const meta = mv ? (STATE_META[mv.frame.state] || STATE_META.i) : STATE_META.i;
+    const dotColor = off ? '#3A4A63' : meta.color;
+    return '<button class="chip' + (sel === id ? ' selected' : '') + (off ? ' offline' : '') +
+      '" data-mid="' + id + '">' +
+      '<span class="dot" style="background:' + dotColor + '"></span>' +
+      (id === 'm' ? 'MAC' : 'WIN') +
+      '<span class="st">' + (off ? '离线' : meta.text) + '</span></button>';
+  }).join('');
+
+  /* 状态卡 */
+  const card = document.getElementById('scard');
+  const mv = S.machines[sel];
+  const off = machineOffline(sel);
+  card.classList.toggle('offline', off);
+  if (!mv) {
+    card.innerHTML = '<div class="rowtop"><span class="owner">' +
+      (sel === 'm' ? 'MAC' : 'WIN') + '</span>' +
+      '<span class="state" style="color:var(--muted)">等待首帧…</span></div>' +
+      '<div class="offlab">PC Offline</div>';
+    return;
+  }
+  const f = mv.frame;
+  const meta = STATE_META[f.state] || STATE_META.i;
+  const stColor = off ? 'var(--muted)' : meta.color;
+  const prog = f.total > 0 ? Math.round(f.done * 100 / f.total) : 0;
+  card.innerHTML =
+    '<div class="rowtop">' +
+      '<span class="owner">' + (sel === 'm' ? 'MAC' : 'WIN') + '</span>' +
+      '<span class="state" style="color:' + stColor + '">' + meta.text + '</span>' +
+      '<span class="elapsed">' + fmtElapsed(f.elapsed) + '</span>' +
+    '</div>' +
+    '<div class="gmsg">' + esc(f.msg || '') + '</div>' +
+    '<div class="meter"><div class="lab"><span>任务</span><span>' +
+      f.done + ' / ' + f.total + '</span></div>' +
+      '<div class="track"><div class="fill" style="width:' + prog + '%"></div></div></div>' +
+    '<div class="meter"><div class="lab"><span>CPU</span><span>' + f.cpu + '%</span></div>' +
+      '<div class="track"><div class="fill" style="width:' + f.cpu + '%"></div></div></div>' +
+    '<div class="meter"><div class="lab"><span>内存</span><span>' + f.ram + '%</span></div>' +
+      '<div class="track"><div class="fill" style="width:' + f.ram + '%"></div></div></div>' +
+    '<div class="offlab">PC Offline（&gt;90s 无帧，以手机可见帧计）</div>';
+}
+
+document.getElementById('chips').addEventListener('click', function (ev) {
+  const chip = ev.target.closest('.chip');
+  if (!chip) return;
+  const mid = chip.getAttribute('data-mid');
+  S.sel = (S.sel === mid) ? null : mid;      // 再点一次取消锁定回自动
+  renderDashboard();
+});
+
+function renderDiag() {
+  const el = document.getElementById('diag');
+  const ago = S.lastPollAt ? Math.round((Date.now() - S.lastPollAt) / 1000) + 's 前' : '—';
+  el.innerHTML =
+    '<span>上次轮询: ' + ago + '</span>' +
+    '<span>节奏: ' + (busy() ? '忙' : '闲') + ' ' + Math.round(baseInterval() / 1000 * 10) / 10 + 's</span>' +
+    '<button id="refreshBtn">立即刷新</button>';
+  const btn = document.getElementById('refreshBtn');
+  if (btn) btn.onclick = function () { schedulePoll(0); };
+}
+
+/* 1s 心跳：倒计时递减渲染 + 到 0 收卡 + 离线灰化重估 */
+setInterval(function () {
+  let expired = false;
+  for (const q of Array.from(S.questions.values())) {
+    if (Date.now() >= q.deadlineMs) {
+      S.questions.delete(q.key);
+      markResolved(q.key);
+      expired = true;
+    }
+  }
+  if (expired) { renderQuestions(); toast('已超时，转回电脑'); }
+  document.querySelectorAll('.qcard').forEach(function (card) {
+    const q = S.questions.get(card.getAttribute('data-key'));
+    if (!q) return;
+    const remain = Math.max(0, Math.ceil((q.deadlineMs - Date.now()) / 1000));
+    const cd = card.querySelector('[data-cd]');
+    if (cd) {
+      cd.textContent = '剩 ' + remain + 's';
+      cd.classList.toggle('low', remain <= 10);
+    }
+    const bar = card.querySelector('[data-cdbar]');
+    if (bar && q.remainTotal > 0) bar.style.width = Math.round(remain * 100 / q.remainTotal) + '%';
+  });
+  renderDashboard();
+}, 1000);
+
+/* ---------------------------------------------------------------
+ * §12 设置页（首次使用必经；UID/ntfy 永不入仓库）
+ * --------------------------------------------------------------- */
+function openSettings() {
+  document.getElementById('fUid').value = cfg.uid;
+  document.getElementById('fNtfy').value = cfg.ntfy;
+  document.getElementById('fTopicStatus').value = cfg.topicStatus;
+  document.getElementById('fTopicCtl').value = cfg.topicCtl;
+  document.body.classList.add('settings');
+}
+function closeSettings() { document.body.classList.remove('settings'); }
+
+document.getElementById('gearBtn').addEventListener('click', openSettings);
+document.getElementById('saveBtn').addEventListener('click', function () {
+  const uid = document.getElementById('fUid').value.trim();
+  if (!uid) { toast('UID 不能为空'); return; }
+  const ts = document.getElementById('fTopicStatus').value.trim() || DEFAULT_CFG.topicStatus;
+  const tc = document.getElementById('fTopicCtl').value.trim() || DEFAULT_CFG.topicCtl;
+  if (!/^[A-Za-z0-9]{1,64}$/.test(ts) || !/^[A-Za-z0-9]{1,64}$/.test(tc)) {
+    toast('主题名仅限字母+数字，≤64 字符'); return;
+  }
+  cfg = {
+    uid: uid,
+    ntfy: document.getElementById('fNtfy').value.trim(),
+    topicStatus: ts,
+    topicCtl: tc
+  };
+  saveCfg(cfg);
+  S.failCount = 0;
+  S.lastErr = null;
+  renderBanner();
+  closeSettings();
+  toast('已保存');
+  schedulePoll(0);
+});
+
+document.getElementById('modePill').addEventListener('click', function () {
+  /* 模式未知时默认发「开」（开闸是最常见诉求）；已知则翻转 */
+  sendMode(S.mode === true ? false : true);
+});
+
+/* ---------------------------------------------------------------
+ * §13 生命周期：可见性恢复立即轮询（息屏恢复）；启动
+ * --------------------------------------------------------------- */
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && cfg.uid) schedulePoll(0);
+});
+
+(function boot() {
+  loadResolved();
+  renderModePill();
+  renderQuestions();
+  renderDashboard();
+  renderDiag();
+  if (!cfg.uid) {
+    openSettings();               // 首次进设置页（规格 §4）
+  } else {
+    schedulePoll(0);
+  }
+})();
+</script>
+</body>
+</html>
