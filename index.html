@@ -477,9 +477,20 @@ function frameQid(doc) {
  * --------------------------------------------------------------- */
 function ingestCtlLast(msg, unixTs) {
   if (typeof msg !== 'string' || !msg) return;
+  const doc = parseFrame(msg);
+  // 终审 B2 修复：m 帧不走原始串去重环。胶囊是「控」这一唯一总闸的显示，
+  // 字面重复的模式帧（如 IO18 连按三次 开→关→开，第三帧与第一帧同字面）
+  // 若被下面的去重环吞掉，胶囊会长期停在错误值、且 applyModeFrame(false)
+  // 的转关清卡副作用一并静默失效。改为与 S.mode 比较后幂等应用：重复应用
+  // 无害（无变化时只重绘胶囊；无卡时清题分支本就是空操作）。
+  if (doc && doc.o === 'm') {
+    rememberRaw(msg);
+    const v = Number(doc.v);
+    if (v === 0 || v === 1) applyModeFrame(v === 1);
+    return;
+  }
   if (S.seenRaw.has(msg)) return;             // 与上次相同的末消息：跳过重复处理
   rememberRaw(msg);
-  const doc = parseFrame(msg);
   if (!doc) return;
   switch (doc.o) {
     case 'W':
@@ -488,11 +499,6 @@ function ingestCtlLast(msg, unixTs) {
     case 'q':
       applyQFrame(doc, unixTs);
       break;
-    case 'm': {
-      const v = Number(doc.v);
-      if (v === 0 || v === 1) applyModeFrame(v === 1);
-      break;
-    }
     case 'r': {
       const key = qKey(frameMachine(doc), frameQid(doc));
       markResolved(key);
@@ -521,6 +527,25 @@ function applyModeFrame(on) {
     }
   }
   renderModePill();
+}
+
+// T8 实机验收补丁：刷新后 S.mode 清零，控制主题 m 帧很稀（仅按键/点胶囊/
+// 固件重连沿才发），胶囊可能长时间停在「控 ?」。collector 只在遥控开启时
+// 才会发布 W/q 题帧，所以页面能出卡本身就是"闸门是开的"确证，据此单向
+// 校准胶囊。安全边界（务必维持）：
+//   1) 只朝「开」修正，永不推断「关」——收不到题可能只是没题，不能证明
+//      闸门关；
+//   2) 不改 applyModeFrame 既有语义——真 m 帧仍是权威，之后仍可把
+//      S.mode 改回 false；
+//   3) 不触发发帧——这是本地显示校准，不是遥控操作，绝不能调
+//      sendMode / bemfaPublish；
+//   4) 只在确认要 openQuestion 的分支内调用——出卡被判重/过期守卫拦下
+//      （没真出卡）不算证据，不校准。
+function calibrateModeOnByQuestion() {
+  if (S.mode !== true) {
+    S.mode = true;
+    renderModePill();
+  }
 }
 
 /* 出题公共落地：由 applyWebFrame/applyQFrame 在各自判重通过后调用 */
@@ -556,6 +581,7 @@ function applyWebFrame(doc, unixTs) {
   const elapsed = unixTs ? Math.max(0, Math.floor(Date.now() / 1000) - unixTs) : 0;
   const remain = (doc.a | 0) - elapsed;
   if (remain <= 0) return;                      // 过期题不出卡
+  calibrateModeOnByQuestion();                  // 确认出卡：收题即证「控」已开
   openQuestion({
     machine: machine,
     qid: qid,
@@ -584,6 +610,7 @@ function applyQFrame(doc, unixTs) {
   const elapsed = unixTs ? Math.max(0, Math.floor(Date.now() / 1000) - unixTs) : 0;
   const remain = (doc.a | 0) - elapsed;
   if (remain <= 0) return;
+  calibrateModeOnByQuestion();                  // 确认出卡：收题即证「控」已开
   openQuestion({
     machine: machine,
     qid: qid,
@@ -607,14 +634,28 @@ function closeQuestion(key, reason) {
 /* ---------------------------------------------------------------
  * §7 状态主题吸收（d 帧，collector payload.py 形状）
  * --------------------------------------------------------------- */
-function ingestStatus(msg) {
-  if (S.seenRaw.has('S|' + msg)) return;      // 状态帧独立命名空间去重
-  rememberRaw('S|' + msg);
+function ingestStatus(msg, unixTs) {
+  // 终审 B3 修复：判重降级为"跳过重复渲染"而非跳过整个吸收——此前重复帧
+  // 直接 return，新鲜度时间戳(lastRxMs)被冻结，深度空闲机连续心跳字面
+  // 相同即被误判离线。新鲜度基线优先取 alltopic item.unix（云端时间戳，
+  // 字面重复的心跳也照样刷新）；unix 缺失时不可无条件回落 Date.now()
+  // （那会让真离线机永不灰化），回落到"仅新帧刷新时间戳"语义。
+  const isNew = !S.seenRaw.has('S|' + msg);   // 状态帧独立命名空间去重
+  if (isNew) rememberRaw('S|' + msg);
   let doc;
   try { doc = JSON.parse(msg); } catch (e) { return; }
   if (!doc || typeof doc !== 'object') return;
   const mid = (typeof doc.m === 'string' && doc.m) ? doc.m.charAt(0) : '';
   if (mid !== 'w' && mid !== 'm') return;
+  const prev = S.machines[mid];
+  let lastRxMs;
+  if (unixTs > 0) {
+    lastRxMs = unixTs * 1000;                 // 有 unix：云端时间戳为准，重复心跳也刷新
+  } else if (isNew) {
+    lastRxMs = Date.now();                    // 无 unix 但是新帧：退化到旧语义
+  } else {
+    lastRxMs = prev ? prev.lastRxMs : Date.now();  // 无 unix 且是重复帧：保持旧时间戳不回落
+  }
   S.machines[mid] = {
     frame: {
       state: (typeof doc.s === 'string' && 'rwdi'.indexOf(doc.s) >= 0) ? doc.s : 'i',
@@ -625,7 +666,7 @@ function ingestStatus(msg) {
       ram: Math.max(0, Math.min(100, Number(doc.r) | 0)),
       msg: String(doc.g || '')
     },
-    lastRxMs: Date.now()
+    lastRxMs: lastRxMs
   };
 }
 
@@ -685,7 +726,8 @@ async function pollOnce() {
       for (const item of (Array.isArray(all.data) ? all.data : [])) {
         if (!item || typeof item !== 'object') continue;
         if (item.topic === cfg.topicStatus && typeof item.msg === 'string') {
-          ingestStatus(item.msg);
+          const su = Number(item.unix);         // 复审 I3：unix 字段真机实态未定
+          ingestStatus(item.msg, Number.isFinite(su) && su > 0 ? su : 0);
         } else if (item.topic === cfg.topicCtl && typeof item.msg === 'string') {
           const u = Number(item.unix);          // 复审 I3：unix 字段真机实态未定
           ingestCtlLast(item.msg, Number.isFinite(u) && u > 0 ? u : 0);
