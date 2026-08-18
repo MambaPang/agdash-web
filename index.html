@@ -2,6 +2,21 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<!-- 跟进批次一 A5（终审 M13）：CSP 必须放在 <meta charset> 之后、<style>/<script>
+     之前——meta 投递的 CSP 只约束它之后被解析的内容。content 串逐项理由：
+     - default-src 'none'         页面零外部资源（grep 证实无 <link>/<img>/<iframe>/
+                                   @font-face/CSS url()；字体系统栈、图标是 HTML 实体）
+     - connect-src apis.bemfa.com 唯一出口白名单，是本条 CSP 的主要收益（万一将来被
+                                   注入，数据也发不出去）
+     - style-src 'unsafe-inline'  单文件页的 <style>/<script> 都是内联，必须放行；
+     - script-src 'unsafe-inline' 已知取舍：unsafe-inline 削弱 XSS 防护，但页面全部
+                                   渲染点已过 esc()，CSP 的价值在出口白名单而非脚本限制
+     - img-src data:              预留（当前页面无 img；若将来加 data: 图标不必再改）
+     - base-uri 'none'            无 <base> 标签，收紧防注入改写相对 URL 解析
+     - form-action 'none'         无 <form> 提交，收紧防注入表单外泄数据
+     故意不写 frame-ancestors/sandbox/report-uri/report-to：CSP 经 <meta http-equiv>
+     投递时规范明确忽略这几条，写了不生效、只会误导后人以为有效。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src https://apis.bemfa.com; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#000000">
 <meta name="mobile-web-app-capable" content="yes">
@@ -56,6 +71,9 @@ header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .5px; 
 .pill.on  { color: #05231A; background: var(--ok); border-color: var(--ok); }
 .pill.off { color: var(--muted); }
 .pill.pending { opacity: .55; }
+/* A2「控」胶囊误触保护：长按 600ms 才切换，短按只提示（见下方 pointer 监听） */
+.pill { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.pill.holding { transform: scale(.94); opacity: .8; transition: transform .12s, opacity .12s; }
 .iconbtn {
   width: 38px; height: 38px; border-radius: 10px;
   background: #0B1526; border: 1px solid #2A3D5F;
@@ -122,6 +140,7 @@ section { margin-bottom: 14px; }
   border-radius: 10px; padding: 0 18px; font-size: 15px;
 }
 .charcnt { font-size: 12px; color: var(--muted); text-align: right; margin-top: 4px; }
+.btnrow + .freerow { margin-top: 12px; }  /* A3：权限卡按钮行与自由文字行之间透气 */
 .qcard button:disabled { opacity: .45; }
 
 /* ---- 双机胶囊 ---- */
@@ -226,13 +245,6 @@ body.settings #viewMain { display: none; }
     <div class="hint">与 collector / 板子共用同一 UID。本页面与代码仓库均不保存该值。</div>
   </div>
   <div class="field">
-    <label for="fNtfy">ntfy 主题名（锁屏推送，选填）</label>
-    <input id="fNtfy" autocomplete="off" autocapitalize="off" spellcheck="false"
-           placeholder="随机长主题名，如 agdash-xxxxxxxx">
-    <div class="hint">在手机 ntfy App 订阅同名主题；collector 配置 [remote] ntfy_topic
-      需填同一值。本页仅保存名称用于备忘，推送由 collector 发起。</div>
-  </div>
-  <div class="field">
     <label for="fTopicStatus">状态主题</label>
     <input id="fTopicStatus" autocomplete="off" autocapitalize="off" spellcheck="false">
   </div>
@@ -308,11 +320,13 @@ const LS_RESOLVED = 'agdash.resolved';
 
 const DEFAULT_CFG = {
   uid: '',                    // 必填，首次进设置页
-  ntfy: '',                   // 选填，仅备忘
   topicStatus: 'agdash01',    // collector config.py 默认值
   topicCtl: 'agdashctl01'     // collector config.py 默认值
 };
 
+// A4（终审 M10）：ntfy 主题名字段已删净。旧版可能残留 ntfy 键，不读不写，
+// 随下次整体覆盖（saveCfg 用新字面重建 cfg）自然消失——无读取即无害，
+// 不主动清理 localStorage 旧值（不为此写一次性迁移代码）。
 function loadCfg() {
   try {
     const raw = localStorage.getItem(LS_CFG);
@@ -582,14 +596,18 @@ function applyWebFrame(doc, unixTs) {
   const remain = (doc.a | 0) - elapsed;
   if (remain <= 0) return;                      // 过期题不出卡
   calibrateModeOnByQuestion();                  // 确认出卡：收题即证「控」已开
+  // 终审 M12：展示字段长度钳制，与 §12.5 片段路径同口径（x60/h120/g200/
+  // p×4×60/k×2×60），复用 clampChars。不动 m/i/a 与任何守卫逻辑。
   openQuestion({
     machine: machine,
     qid: qid,
-    tool: String(doc.x || ''),
-    header: String(doc.h || ''),
-    question: String(doc.g || ''),
-    options: Array.isArray(doc.p) ? doc.p.map(String).slice(0, 4) : [],
-    quick: Array.isArray(doc.k) ? doc.k.map(String).slice(0, 2) : [],
+    tool: clampChars(String(doc.x || ''), 60),
+    header: clampChars(String(doc.h || ''), 120),
+    question: clampChars(String(doc.g || ''), 200),
+    options: Array.isArray(doc.p) ? doc.p.map(String).slice(0, 4)
+               .map(function (o) { return clampChars(o, 60); }) : [],
+    quick: Array.isArray(doc.k) ? doc.k.map(String).slice(0, 2)
+               .map(function (o) { return clampChars(o, 60); }) : [],
     deadline: Date.now() + remain * 1000
   });
   alertNewQuestion();
@@ -911,7 +929,19 @@ function renderQuestions() {
         '<div class="btnrow">' +
           '<button class="bigbtn allow" data-act="allow">允许</button>' +
           '<button class="bigbtn deny" data-act="deny">拒绝</button>' +
-        '</div>';
+        '</div>' +
+        /* A3：权限卡也给自由文字入口。t 帧对权限题 collector 侧本就生效
+         * （decision.py 的 t 分支不看 options，在两题型共用的等待循环里），
+         * gate 两路也都支持 text 裁决——这里只是把 UI 入口打开。与 ask 分支
+         * 逐字同款：同一 class 名与 data 属性，#qArea 的既有事件委托（click
+         * act='text'、input 计数、keydown Enter 发送）与字符计数逻辑零改动
+         * 即可生效。 */
+        '<div class="freerow">' +
+          '<input data-free maxlength="200" placeholder="自由文字（≤100 字）"' +
+          ' autocomplete="off" enterkeyhint="send">' +
+          '<button class="sendbtn" data-act="text">发送</button>' +
+        '</div>' +
+        '<div class="charcnt" data-cnt>0 / ' + TEXT_MAX_CHARS + '</div>';
     } else {
       // W 帧一帧装全选项，q.options 恒为非空数组（选择题分支保证，见 openQuestion）
       const opts = (q.options || []).map(function (lab, idx) {
@@ -1087,11 +1117,10 @@ setInterval(function () {
 }, 1000);
 
 /* ---------------------------------------------------------------
- * §12 设置页（首次使用必经；UID/ntfy 永不入仓库）
+ * §12 设置页（首次使用必经；UID 永不入仓库）
  * --------------------------------------------------------------- */
 function openSettings() {
   document.getElementById('fUid').value = cfg.uid;
-  document.getElementById('fNtfy').value = cfg.ntfy;
   document.getElementById('fTopicStatus').value = cfg.topicStatus;
   document.getElementById('fTopicCtl').value = cfg.topicCtl;
   document.body.classList.add('settings');
@@ -1109,7 +1138,6 @@ document.getElementById('saveBtn').addEventListener('click', function () {
   }
   cfg = {
     uid: uid,
-    ntfy: document.getElementById('fNtfy').value.trim(),
     topicStatus: ts,
     topicCtl: tc
   };
@@ -1122,10 +1150,91 @@ document.getElementById('saveBtn').addEventListener('click', function () {
   schedulePoll(0);
 });
 
-document.getElementById('modePill').addEventListener('click', function () {
-  /* 模式未知时默认发「开」（开闸是最常见诉求）；已知则翻转 */
-  sendMode(S.mode === true ? false : true);
-});
+/* A2「控」胶囊误触保护（终审后续）：业主实测误触过一次直接关掉作答闸门，
+ * 改点击即翻转为长按 600ms 才翻转，短按只提示。不动 buildModeFrame/
+ * sendMode/applyModeFrame/calibrateModeOnByQuestion 任何一处。 */
+const MODE_HOLD_MS = 600;
+(function bindModePill() {
+  const el = document.getElementById('modePill');
+  let holdTimer = 0, fired = false;
+
+  function start(ev) {
+    if (ev.button !== undefined && ev.button !== 0) return;   // 只认主键
+    fired = false;
+    clearTimeout(holdTimer);
+    el.classList.add('holding');
+    holdTimer = setTimeout(function () {
+      fired = true;                       // 已达阈值，随后的 click 是尾巴
+      el.classList.remove('holding');
+      if (navigator.vibrate) navigator.vibrate(30);   // 触觉回执，无则静默
+      /* 语义与旧 click 分支逐字一致：未知→开，已知→翻转 */
+      sendMode(S.mode === true ? false : true);
+    }, MODE_HOLD_MS);
+  }
+  function cancel() { clearTimeout(holdTimer); el.classList.remove('holding'); }
+
+  el.addEventListener('pointerdown', start);
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('pointercancel', cancel);   // 滑动/来电打断
+  el.addEventListener('pointerleave', cancel);    // 手指移出胶囊
+  el.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    if (fired) { fired = false; return; }         // 长按的尾巴，吞掉
+    toast('长按切换「控」开关');
+  });
+})();
+
+/* ---------------------------------------------------------------
+ * §12.5 通知片段直出题卡（跟进批次一 Task 1，A1+B1）
+ * collector 推送时把题目本身编成 base64url 片段挂在跳转 URL 的 #q= 上；
+ * 点通知直接出题卡，绕开"跳转时 W 帧已被别的帧挤出末位、页面看不到题"的坑。
+ * --------------------------------------------------------------- */
+const FRAG_MAX_B64 = 4096;   // W 最坏 ~500B → b64 ~700，4K 已很宽
+
+function b64urlToUtf8(s) {
+  s = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4 !== 0) s += '=';
+  const bin = atob(s);                       // 非法字符 → 抛 → 上层静默
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+/* 从 location.hash 取 W 帧并走既有 applyWebFrame 出卡；任何异常一律静默。 */
+function ingestFragmentQuestion() {
+  let consumed = false;
+  try {
+    const mt = /^#q=([A-Za-z0-9_-]+={0,2})$/.exec(String(location.hash || ''));
+    if (!mt) return;
+    consumed = true;                         // 认得这个片段：无论成败都擦掉
+    if (mt[1].length > FRAG_MAX_B64) return;
+    const doc = JSON.parse(b64urlToUtf8(mt[1]));
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return;
+    if (doc.o !== 'W') return;                            // 只认 W
+    if ('wm'.indexOf(String(doc.m || '').charAt(0)) < 0) return;  // 机器白名单
+    /* 片段是全页唯一「第三方可直接投喂」的入口（一条链接即可），故比云端路径
+       多一层钳制：长度（终审 M12 同口径，防畸形大帧卡渲染）+ a 上限（防造一张
+       永不消失的卡）。渲染仍全程走 esc()，此处只防体量不防注入。 */
+    doc.x = clampChars(String(doc.x || ''), 60);
+    doc.h = clampChars(String(doc.h || ''), 120);
+    doc.g = clampChars(String(doc.g || ''), 200);
+    doc.p = Array.isArray(doc.p) ? doc.p.slice(0, 4)
+              .map(function (o) { return clampChars(String(o), 60); }) : [];
+    doc.k = Array.isArray(doc.k) ? doc.k.slice(0, 2)
+              .map(function (o) { return clampChars(String(o), 60); }) : [];
+    doc.a = Math.min(600, doc.a | 0);
+    const u = Number(doc.u);
+    if (!Number.isFinite(u) || u <= 0) return;   // 无发布时刻 → 拒收，见上文 M4
+    applyWebFrame(doc, u);                       // 判重/过期/校准全部复用
+  } catch (e) {
+    /* 失败静默：坏片段等于没片段，页面照常走轮询 */
+  } finally {
+    if (consumed) {
+      try { history.replaceState(null, '', location.pathname + location.search); }
+      catch (e2) { /* file:// 下可能被拒，忽略 */ }
+    }
+  }
+}
 
 /* ---------------------------------------------------------------
  * §13 生命周期：可见性恢复立即轮询（息屏恢复）；启动
@@ -1136,6 +1245,7 @@ document.addEventListener('visibilitychange', function () {
 
 (function boot() {
   loadResolved();
+  ingestFragmentQuestion();     // 通知片段直出题卡（§12.5）；无片段时零开销
   renderModePill();
   renderQuestions();
   renderDashboard();
