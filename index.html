@@ -140,6 +140,20 @@ section { margin-bottom: 14px; }
   border-radius: 10px; padding: 0 18px; font-size: 15px;
 }
 .charcnt { font-size: 12px; color: var(--muted); text-align: right; margin-top: 4px; }
+/* T7 复审修复波：云端 128 码点收敛后题卡可能只是摘要，页面自己推断出来后提示。
+   T7 收尾波订正：上一波注释写"只用既有色板、不引入新颜色"——那句只对**文字色**
+   成立（var(--warn)/var(--danger)），底色/边框当时新造了 #2A2210/#4A3C17 两个
+   值。现改为复用 #banner.net 那对既有黄色底/边（#3A2C10/#5A4620），全页黄色警示
+   面板从此同一套色值；.dup 的 #2A1B1B/#5E2626 本来就是既有值（分别来自
+   .bigbtn.deny 与 #banner.uid），不动。
+   本页是**纯深色单主题**（全文 0 处 prefers-color-scheme、无浅色分支），
+   这些色值只需在深底上成立，别写成"深浅色都成立"。 */
+.qwarn {
+  font-size: 12.5px; line-height: 1.45; margin: 2px 0 9px;
+  color: var(--warn); background: #3A2C10; border: 1px solid #5A4620;
+  border-radius: 9px; padding: 7px 9px;
+}
+.qwarn.dup { color: var(--danger); background: #2A1B1B; border-color: #5E2626; font-weight: 700; }
 .btnrow + .freerow { margin-top: 12px; }  /* A3：权限卡按钮行与自由文字行之间透气 */
 .qcard button:disabled { opacity: .45; }
 
@@ -285,7 +299,9 @@ body.settings #viewMain { display: none; }
  *    不解析，遇到直接忽略（W 帧已经把它们的信息一次装全）。
  *  上行帧（本页构造，与批次一/二字面逐字一致）：
  *    a  {"o":"a","m":M,"i":N,"r":"y|n|1..4|k1|k2"}
- *    t  {"o":"t","m":M,"i":N,"x":"自由文字"}   x ≤100 字符（v1.2 新增）
+ *    t  {"o":"t","m":M,"i":N,"x":"自由文字"}   v1.2 新增。x 的长度上限不是
+ *       一个固定字数：整帧受云端 128 码点硬限，信封占 30~31，故页面名义上限
+ *       TEXT_MAX_CHARS=90 再按整帧实际码点数收敛（见 fitTextFrame）
  *    m  {"o":"m","v":0|1}
  *  状态帧（collector payload.py）：
  *    d  {"v":2,"m":"w|m","s":"r|w|d|i","e":s,"d":n,"t":n,"q":-1,"c":%,"r":%,"g":msg}
@@ -303,7 +319,24 @@ const BACKOFF_MAX_MS  = 30000;  // 规格 §2/§7
 const OFFLINE_MS      = 90000;  // 手机页专用灰化阈值（spec §10 裁决⑥：独立于
                                  // 固件 model.h 常数取值，容忍页面轮询节奏+
                                  // 网络时延，双机遮蔽以手机可见帧计）
-const TEXT_MAX_CHARS  = 100;    // 规格 §3（collector 侧再钳 [:100] 双层防御）
+/* T7 复审修复波（2026-08-18）：t 帧与 W 帧是**同一个根因**——巴法云 postJsonMsg
+ * 对 msg 字段有 128 个 **Unicode 码点**硬限（不是字节、不是 UTF-16 单元；实测
+ * 129 个码点无论什么字符都返回 HTTP 200 + code 10002）。t 帧信封实测 30 个码点
+ * （qid 一位）/ 31（两位）：{"o":"t","m":"w","i":8,"x":""}。
+ * 于是原先的名义上限 100 是**发不出去的数**：业主打满 100 个汉字 → 整帧 130~131
+ * 码点 → 云端拒收 → 页面只报「发送失败，请重试」，重试永远失败且没有任何提示
+ * 说明原因。
+ * 90 的来历：97 = 128 − 31（最坏信封）是零转义时的天花板；留 7 个码点余量吸收
+ * JSON 转义膨胀（引号/反斜杠 1→2 个码点），即打满 90 字里还能有 7 个引号也照发；
+ * 再多则由 fitTextFrame 按**整帧实际码点数**兜底削短并明确提示业主。
+ * 这个常量是**五处**的唯一来源：两处 placeholder（权限卡/选择卡）、两处计数器
+ * 初值、一处输入实时计数，外加 sendText 的出口钳制。改它一处即全改——上一版
+ * 的缺陷正是"钳制是一个数、UI 文案写着另一个数"，骗了业主一整波；
+ * web/tools/check-page.mjs 里有一条断言专门禁止再出现写死的字数文案。
+ */
+const TEXT_MAX_CHARS  = 90;     // 名义上限（UI 显示与 sendText 钳制同源此常量）
+const FRAME_MAX_CP    = 128;    // 云端 msg 硬限, 单位 Unicode 码点（对齐 ctl_channel.MAX_CHARS）
+const TEXT_FIT_ROUNDS = 12;     // 整帧收敛二分轮数上限（90 字需 7 轮, 12 是余量）
 const RESOLVED_TTL_MS = 600000; // 去重游标 10min 过期（qid mod 100 复用防误伤）
 // 已知边界（复审记录，仅注释不改逻辑）：collector 重启会把 _next_qid 归零，
 // 若重启后 10 分钟内又对同一 machine 发出 qid=0 的新题，且该 qid 恰好在
@@ -403,9 +436,73 @@ function esc(s) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
-function clampChars(s, n) {           // 按 Unicode 码点截断（对齐 Python len 语义）
+// 按 Unicode 码点截断（对齐 Python len 语义；Array.from 保证不劈开代理对）。
+// mark=true 时把末位换成「…」且**标记计入 n**（同 collector 侧 ctl_channel 七处
+// 与片段阶梯的惯例）——T7：业主在真机上一眼看出题干被切了却没有省略号。
+// 默认不补标记是刻意的：出口路 sendText 钳的是用户要发出去的答案正文（t 帧 →
+// collector scrub(a.text,100) → Claude 上下文），补「…」等于往用户答案里塞一个
+// 他没打的字符；那里的名义上限（TEXT_MAX_CHARS，T7 复审修复波起 = 90，此前
+// 写死 100）是既有 UI 契约"超出部分将被截断"，语义是限长而非显示省略。
+// 将来新增的调用点也默认保持今天的行为。
+function cpLen(s) { return Array.from(String(s)).length; }   // 码点数（非 UTF-16 单元）
+function clampChars(s, n, mark) {
   const cps = Array.from(String(s));
-  return cps.length <= n ? String(s) : cps.slice(0, n).join('');
+  if (cps.length <= n) return String(s);      // 未截断 → 不留痕
+  if (!mark) return cps.slice(0, n).join('');  // 既有语义：裸截
+  if (n <= 1) return n >= 1 ? '…' : '';        // 退化预算仍留一个可见字符
+  // replace 对应 collector 侧的 rstrip('…')：源文自带的省略号刚好压在切点上时
+  // 不叠成「……」。片段路（§12.5）先钳一刀、applyWebFrame 再钳同口径一刀也
+  // 不会累积——第一刀的结果长度恰为 n，第二刀走上面的 len<=n 早退。
+  return cps.slice(0, n - 1).join('').replace(/…+$/, '') + '…';
+}
+/* T7 复审修复波（第 2 组 e）：**零协议成本**的"缩水"解歧义。
+   云端那条线（开着页面轮询）看到的 W 帧已经过 collector 的 128 码点保结构降级
+   （见 ctl_channel._shrink_web_step），题干/表头/选项都可能只是摘要；极端情况下
+   四个选项被削成逐字相同（"把超时从 …"），业主盲选一个就是不可撤销的错答。
+   页面无法拿到全文，但**能自己看出被削了**，于是至少能提醒业主别盲选：
+     判据一：任何展示字段以「…」结尾 —— collector 侧的截断标记就是这个字符
+             （U+2026，cut_ellipsis 保证标记恒在尾部且不叠成「……」）。
+     判据二：选择卡（p 非空）却连题干都是空的 —— 降级阶梯把 g/h/x **整档清空**
+             时不留标记，判据一看不见（LONG_ASK 那道题实测就是这个形态）。
+   **两条判据都会误报，这是刻意接受的代价**（T7 收尾波订正：上一波注释只承认了
+   判据二的假阳性，还断言「「…」是 collector 侧唯一的截断标记」——那句话是错的。
+   「…」是 collector 唯一**产出**的截断标记，但这些字段装的是 Claude 和业主的
+   数据，中文散文里「…」本来就很常见）：
+     - 判据一的假阳性：内容**自带** U+2026 且恰好落在末位。实测 g="echo 载入中…"
+       的合规短帧（远未超限、一个字都没被削）照样出黄字提示；片段路上
+       g="正在思考…" 会显示"这里显示的是节选"——而它其实是全文，那句话是假的。
+     - 判据二的假阳性：Claude 真的发了一道没有题干的选择题。
+   取舍不变：宁可多提示（假阳性 = 多一行小字，业主点通知看到的是同一份文字）
+   也不漏报（假阴性 = 盲选错答，不可撤销）。真要消掉假阳性只有两条路——协议加
+   一个"被削过"的布尔位（128 预算里现在挤不出来），或页面拿到原文自己比对
+   （拿不到，那正是本函数存在的理由）。故判据不改，只把误报写明白。
+   不新增任何协议字段（预算宝贵），全靠页面推断。 */
+function frameTruncated(q) {
+  const fields = [q.tool, q.header, q.text]
+    .concat(Array.isArray(q.options) ? q.options : [])
+    .concat(Array.isArray(q.quick) ? q.quick : []);
+  for (let i = 0; i < fields.length; i++) {
+    const v = fields[i];
+    if (typeof v === 'string' && v.slice(-1) === '…') return true;
+  }
+  return q.kind === 'ask' && !q.text;
+}
+/* 逐字相同的两条选项 = "别盲选"级警示（比单纯截断严重得多：截断只是看不全，
+   重复是**看不出区别却必须选一个**）。O(n^2) 但 n ≤ 4。
+   T7 收尾波订正：本函数只做"两条 label 一模一样吗"这个纯比较，**不知道原因**。
+   两种成因都会命中：① 云端 128 收敛把长选项削成同一个前缀（常见成因）；
+   ② Claude 出题时本来就给了两条一样的 label（实测 p=["同意","同意"] 同样命中，
+   此时点通知看全文也还是一样）。上一波的红字措辞写死了成因①（"有选项被削得
+   逐字相同"），在成因②下是把锅扣错了人，故措辞已改成两种情形都成立的写法
+   并给出成因②的出路。 */
+function dupOptionLabels(opts) {
+  const list = Array.isArray(opts) ? opts : [];
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (list[i] === list[j]) return true;
+    }
+  }
+  return false;
 }
 function fmtElapsed(sec) {
   sec = Math.max(0, sec | 0);
@@ -575,6 +672,7 @@ function openQuestion(opts) {
     text: String(opts.question || ''),
     options: options,
     quick: Array.isArray(opts.quick) ? opts.quick : [],
+    src: opts.src === 'frag' ? 'frag' : 'cloud',
     remainTotal: remainTotal,
     deadlineMs: opts.deadline,
     freshUntil: Date.now() + 4000
@@ -584,7 +682,7 @@ function openQuestion(opts) {
 
 // W 镜像帧 → 题卡。p 空数组=权限题(y/n 两大键); 非空=选择题(选项+快捷+文字)。
 // 剩余秒 = 帧内 a - (本机当前时间 - alltopic item.unix)，负数拒收(过期题)。
-function applyWebFrame(doc, unixTs) {
+function applyWebFrame(doc, unixTs, src) {
   const machine = frameMachine(doc);
   const qid = frameQid(doc);
   if (!machine || qid < 0 || qid > 99) return;
@@ -598,17 +696,21 @@ function applyWebFrame(doc, unixTs) {
   calibrateModeOnByQuestion();                  // 确认出卡：收题即证「控」已开
   // 终审 M12：展示字段长度钳制，与 §12.5 片段路径同口径（x60/h120/g200/
   // p×4×60/k×2×60），复用 clampChars。不动 m/i/a 与任何守卫逻辑。
+  // T7：展示路一律补「…」（第三参 true）——截断必须让业主看得见。
   openQuestion({
     machine: machine,
     qid: qid,
-    tool: clampChars(String(doc.x || ''), 60),
-    header: clampChars(String(doc.h || ''), 120),
-    question: clampChars(String(doc.g || ''), 200),
+    tool: clampChars(String(doc.x || ''), 60, true),
+    header: clampChars(String(doc.h || ''), 120, true),
+    question: clampChars(String(doc.g || ''), 200, true),
     options: Array.isArray(doc.p) ? doc.p.map(String).slice(0, 4)
-               .map(function (o) { return clampChars(o, 60); }) : [],
+               .map(function (o) { return clampChars(o, 60, true); }) : [],
     quick: Array.isArray(doc.k) ? doc.k.map(String).slice(0, 2)
-               .map(function (o) { return clampChars(o, 60); }) : [],
-    deadline: Date.now() + remain * 1000
+               .map(function (o) { return clampChars(o, 60, true); }) : [],
+    deadline: Date.now() + remain * 1000,
+    // 来路只用于"缩水提示"的措辞（云端轮询 vs 点通知的片段），页面内部字段，
+    // 不入任何协议、也不参与判重/过期/题型判定。
+    src: src === 'frag' ? 'frag' : 'cloud'
   });
   alertNewQuestion();
 }
@@ -779,6 +881,84 @@ function buildAnswerFrame(machine, qid, rcode) {
 function buildTextFrame(machine, qid, text) {
   return JSON.stringify({ o: 't', m: machine, i: qid, x: text });
 }
+/* T7 复审修复波：**按整帧实际码点数收敛**，而不是按 text 的字符数。
+ * 为什么必须按整帧：JSON 转义会膨胀（引号/反斜杠 1→2 个码点，孤代理 1→6），
+ * 纯字符数算不出来——这正是 W 帧那边同一个根因下学到的东西。
+ * 为什么必须在**页面侧**：超限帧被巴法云用 code 10002 顶回来，压根**到不了
+ * collector**；server/decision 那边的 scrub(text, 100) 是帧落地之后的第二层
+ * 防御，对这个失败模式完全无效。页面这一刀是唯一有效的那道。
+ * 为什么是二分、不是"按 deficit 砍一刀"：砍 deficit 个码点看着够（每个 text
+ * 码点在帧里至少占 1 个），但对被转义的字符是**双倍偿还**——90 个引号那次实测，
+ * 帧 210 码点、deficit 82，砍掉 82 个引号后帧只剩 46，明明还能装 49 个引号却只
+ * 发出去 8 个。少发一多半字还倒过来触发"已截断"提示，比不收敛好不了多少。
+ * 帧长随前缀长度**严格单调递增**（每多一个码点至少多 1），故可二分出"最长发得
+ * 出去的前缀"，代价是 ~log2(n) 次重建（n≤90 时 7 次），结果是紧贴 128 的最优解。
+ * 循环有界：hi−lo 每轮至少减半，另加 TEXT_FIT_ROUNDS 硬上限兜底——打到上限只会
+ * 保守地少发几个字（lo 恒是"已验证发得出去"的长度），绝不会发出超限帧。
+ * 削的时候是**裸截**（不补「…」）：这是业主要发给 Claude 的答案正文，不该往里
+ * 塞一个他没打的字符（同 clampChars 注释里的既有裁决）。
+ * 返回 cut=true 表示"名义上限之外又被削掉了"，调用方必须让业主看见（静默截断
+ * 比截断更坏）。 */
+function fitTextFrame(machine, qid, text) {
+  const cps = Array.from(String(text));
+  const whole = buildTextFrame(machine, qid, cps.join(''));
+  if (cpLen(whole) <= FRAME_MAX_CP) {
+    return { frame: whole, text: cps.join(''), cut: false, rounds: 0 };
+  }
+  let lo = 0;                 // 不变式: lo 个码点**已验证**装得下
+  let hi = cps.length;        // 不变式: hi 个码点装不下（whole 刚证明了）
+  let rounds = 0;
+  while (hi - lo > 1 && rounds < TEXT_FIT_ROUNDS) {
+    const mid = (lo + hi) >> 1;
+    const probe = buildTextFrame(machine, qid, cps.slice(0, mid).join(''));
+    if (cpLen(probe) <= FRAME_MAX_CP) lo = mid; else hi = mid;
+    rounds++;
+  }
+  const t = cps.slice(0, lo).join('');
+  // lo 恒经过验证, 唯一例外是 lo===0 且连空信封都超 128（machine/qid 畸形）——
+  // 那时返回的帧仍超限, publish 会失败并走既有的「发送失败，请重试」，与收敛
+  // 出现之前的行为一致（不吞、不静默改写业主内容）。
+  return { frame: buildTextFrame(machine, qid, t), text: t,
+           cut: t !== cps.join(''), rounds: rounds };
+}
+/* T7 收尾波（2026-08-18）：自由文字出口的**唯一判据源**。
+ * 为什么要把它从 sendText 里提出来：出口管线有**两刀**——
+ *   ① 名义上限那一刀：clampChars(clean, TEXT_MAX_CHARS)，业主打 120 个汉字时
+ *      这一刀就砍掉 30 个字（损失最大的那一刀）；
+ *   ② 转义膨胀那一刀：fitTextFrame 按整帧实际码点数再收敛（引号/反斜杠 1→2）。
+ * 上一波的"已截断"提示只看 ②（fit.cut）。但 fitTextFrame 收到的**已经是被 ①
+ * 砍过的 90 个字**，所以 fit.cut 恒为 false —— 复审逐行追出的业主体验是：
+ * 输入框（maxlength=200）里看得见 120 字、计数器冻在「90 / 90」、点发送后
+ * 弹一句「文字已发送」就完了，**零提示**。业主以为 120 字都发出去了，而 Claude
+ * 收到的是半句话。反过来 ②（损失小）却报警。判据搞反了。
+ * 现判据：**最终发出的文字比控制字符过滤后的原文更短**，即把两刀都算进去；
+ * 并如实回报 sent/origin 两个数字，让业主知道少发了多少（静默截断比截断更坏）。
+ * 口径细节：origin 取 filtered.trim() 的码点数 —— 控制字符是"业主本来也没打
+ * 出来的东西"（同 collector.sanitize 姿态）、首尾空白被 trim 掉不算丢字，
+ * 二者都不该被算成"截断"去无谓惊动业主；中间的空白照常计入。
+ * 出口只发这一个函数造的 frame：多一条旁路就多一处判据分叉（上一波的坑）。 */
+function planTextSend(machine, qid, raw) {
+  const filtered = String(raw).replace(/[\u0000-\u001F\u007F]/g, '');
+  /* trim 必须在 clampChars **之前**（收尾波验证员实测）：反过来时 95 个前导
+     空格 + 10 个实字会被名义上限那一刀砍成纯空格 → clean 为空 → 业主看到
+     「请输入内容」，而他确实打了 10 个字。先 trim 再钳，那 10 个字正常发出；
+     尾部再 trim 一次，切点恰落在空格上时不留尾巴。 */
+  const clean = clampChars(filtered.trim(), TEXT_MAX_CHARS).trim();
+  const fit = fitTextFrame(machine, qid, clean);
+  const sent = cpLen(fit.text);
+  const origin = cpLen(filtered.trim());
+  return { frame: fit.frame, clean: clean, text: fit.text,
+           sent: sent, origin: origin, truncated: sent < origin,
+           rounds: fit.rounds };
+}
+/* 截断提示的文案。提成纯函数是为了能被 web/tools/check-page.mjs **对整句**下断言
+   ——收尾波验证员做过一次注入：把 sent 与 origin 两个数**互换**（业主会读到「只发出
+   了前 120 字（原 90 字）」，方向正好反过来，比静默截断更误导），而当时门禁只查
+   `.sent`/`.origin` 两个子串在不在，104 条断言全绿放行。文案与判据一样是业主可见
+   契约，得钉整句。 */
+function truncNotice(plan) {
+  return '内容过长，只发出了前 ' + plan.sent + ' 字（原 ' + plan.origin + ' 字）';
+}
 function buildModeFrame(on) {
   return JSON.stringify({ o: 'm', v: on ? 1 : 0 });
 }
@@ -800,16 +980,26 @@ async function sendAnswer(q, rcode) {
 }
 
 async function sendText(q, text) {
-  const clean = clampChars(text.replace(/[\u0000-\u001F\u007F]/g, ''), TEXT_MAX_CHARS).trim();
-  if (!clean) { toast('请输入内容'); return; }
+  // 控制字符过滤 / 名义上限 / 整帧收敛 / 截断判据全在 planTextSend 里（出口只此
+  // 一条，见其上方注释）。这里只管发帧、收卡、如实报数字。
+  const plan = planTextSend(q.machine, q.qid, text);
+  if (!plan.clean) { toast('请输入内容'); return; }
   if (S.sending) return;
   S.sending = true;
   setCardDisabled(q.key, true);
-  const ok = await bemfaPublish(buildTextFrame(q.machine, q.qid, clean));
+  const ok = await bemfaPublish(plan.frame);
   S.sending = false;
   if (ok) {
     markResolved(q.key);
     closeQuestion(q.key, '文字已发送');
+    /* 真少发了字就必须让业主看见（静默截断比截断更坏），而且要报出**少了多少**：
+       名义上限那一刀和转义膨胀那一刀业主分不清，也不需要分——他要的信息是
+       "我打的没全发出去、实际发了几个字"。至于"为什么"，输入框右下角那个实时
+       计数器一直在说（它显示的就是真实还能发几个字）。
+       closeQuestion 已经弹了一条 toast，toast 是单例，故这条延后 200ms 盖上去。 */
+    if (plan.truncated) {
+      setTimeout(function () { toast(truncNotice(plan)); }, 200);
+    }
     schedulePoll(300);
   } else {
     setCardDisabled(q.key, false);
@@ -920,12 +1110,39 @@ function renderQuestions() {
   for (const q of S.questions.values()) {
     const cd = cardCountdownHtml(q).split('|');
     const mName = q.machine === 'm' ? 'MAC' : 'WIN';
+    /* T7 复审修复波：题面缩水提示。重复选项是更严重的一档，两者只显示一条
+       （重复优先）——同时挂两条小字反而没人看。措辞按来路分：云端轮询这条路
+       点通知能看全文；片段路（#q= 进来的）本身就是通知那条路，无处可去。 */
+    let warn = '';
+    if (dupOptionLabels(q.options)) {
+      /* 措辞不写死成因（见 dupOptionLabels 上方注释：削短所致 or 出题就重复）。
+         **红字也必须按来路分支**（I2 终审 2026-08-18）：上一版是写死的一句，
+         无论来路都叫业主去点推送通知看全文，并声称"若全文里两条也一样，
+         就一定是出题时本来就重复"。业主本来就是点通知进来的（src='frag'）时，
+         这句话把他打回**同一条通知、同一张卡**；而唯一正确的出路"去电脑上答"
+         被挂在那个**假前提**下。实际上片段路自己也有降级阶梯，
+         p 可能被削到 6 码点（比轮询路的 12 还短，见 collector 侧
+         _shrink_web_step docstring 的实测），重复很可能正是片段阶梯削出来的。
+         故片段路直接给正确出路，不再拿"再去点一次通知"打发业主。 */
+      warn = q.src === 'frag'
+        ? '<div class="qwarn dup">注意：有两条选项的文字完全一样，光看这里'
+          + '分不出区别——别盲选。你已经是从推送通知进来的，这里就是最全的'
+          + '一份了（题目很长时通知里的题面也会被削短）。请直接去电脑上答，'
+          + '或让 Claude 把选项写短一点重问。</div>'
+        : '<div class="qwarn dup">注意：有两条选项的文字完全一样，光看这里'
+          + '分不出区别——别盲选。多半是被云端削短了，点手机推送通知看全文；'
+          + '若通知里两条仍然一样，别在手机上猜，请去电脑上答。</div>';
+    } else if (frameTruncated(q)) {
+      warn = q.src === 'frag'
+        ? '<div class="qwarn">题面较长，这里显示的是节选。</div>'
+        : '<div class="qwarn">题面已被云端 128 字上限削短，点推送通知可看全文。</div>';
+    }
     let body = '';
     if (q.kind === 'perm') {
       body =
         '<div class="qtool">' + esc(q.tool || '权限请求') + '</div>' +
         (q.text ? '<div class="qtext">' + esc(q.text) + '</div>' : '') +
-        cd[1] +
+        cd[1] + warn +
         '<div class="btnrow">' +
           '<button class="bigbtn allow" data-act="allow">允许</button>' +
           '<button class="bigbtn deny" data-act="deny">拒绝</button>' +
@@ -937,7 +1154,8 @@ function renderQuestions() {
          * act='text'、input 计数、keydown Enter 发送）与字符计数逻辑零改动
          * 即可生效。 */
         '<div class="freerow">' +
-          '<input data-free maxlength="200" placeholder="自由文字（≤100 字）"' +
+          '<input data-free maxlength="200" placeholder="自由文字（≤' +
+          TEXT_MAX_CHARS + ' 字）"' +
           ' autocomplete="off" enterkeyhint="send">' +
           '<button class="sendbtn" data-act="text">发送</button>' +
         '</div>' +
@@ -958,9 +1176,10 @@ function renderQuestions() {
       body =
         (q.header ? '<div class="qtool">' + esc(q.header) + '</div>' : '') +
         (q.text ? '<div class="qtext">' + esc(q.text) + '</div>' : '') +
-        cd[1] + opts + quick +
+        cd[1] + warn + opts + quick +
         '<div class="freerow">' +
-          '<input data-free maxlength="200" placeholder="自由文字（≤100 字）"' +
+          '<input data-free maxlength="200" placeholder="自由文字（≤' +
+          TEXT_MAX_CHARS + ' 字）"' +
           ' autocomplete="off" enterkeyhint="send">' +
           '<button class="sendbtn" data-act="text">发送</button>' +
         '</div>' +
@@ -1001,10 +1220,17 @@ document.getElementById('qArea').addEventListener('input', function (ev) {
   const card = ev.target.closest('.qcard');
   const n = Array.from(ev.target.value).length;
   const cnt = card.querySelector('[data-cnt]');
-  if (cnt) {
-    cnt.textContent = Math.min(n, TEXT_MAX_CHARS) + ' / ' + TEXT_MAX_CHARS +
-      (n > TEXT_MAX_CHARS ? '（超出部分将被截断）' : '');
-  }
+  if (!cnt) return;
+  /* T7 复审修复波：分母恒是名义上限（同源 TEXT_MAX_CHARS），分子是**真实可发
+     字数**——引号/反斜杠的 JSON 转义会让整帧提前撞上 128 码点，那时可发字数比
+     名义上限还少。先算出来再显示，别让业主打完了才知道被截。 */
+  const q = S.questions.get(card.getAttribute('data-key'));
+  const clean = clampChars(ev.target.value.replace(/[\u0000-\u001F\u007F]/g, ''),
+                           TEXT_MAX_CHARS);
+  const room = q ? cpLen(fitTextFrame(q.machine, q.qid, clean).text)
+                 : Math.min(n, TEXT_MAX_CHARS);
+  cnt.textContent = Math.min(n, room) + ' / ' + TEXT_MAX_CHARS +
+    (n > room ? '（超出部分将被截断）' : '');
 });
 document.getElementById('qArea').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter' && ev.target.matches('[data-free]')) {
@@ -1214,18 +1440,29 @@ function ingestFragmentQuestion() {
     if ('wm'.indexOf(String(doc.m || '').charAt(0)) < 0) return;  // 机器白名单
     /* 片段是全页唯一「第三方可直接投喂」的入口（一条链接即可），故比云端路径
        多一层钳制：长度（终审 M12 同口径，防畸形大帧卡渲染）+ a 上限（防造一张
-       永不消失的卡）。渲染仍全程走 esc()，此处只防体量不防注入。 */
-    doc.x = clampChars(String(doc.x || ''), 60);
-    doc.h = clampChars(String(doc.h || ''), 120);
-    doc.g = clampChars(String(doc.g || ''), 200);
+       永不消失的卡）。渲染仍全程走 esc()，此处只防体量、**不防语义伪造**。
+       **"不防语义伪造"是一条已知风险，不是疏漏后的沉默**（I6 终审 2026-08-18）：
+       攻击者用一条 `#q=<自造 W 帧>` 链接就能造出一张与真题外观一致的卡，业主点
+       「允许」后页面用他自己的 UID 发出答案帧，而 collector 对答案帧只校验
+       (machine, qid)、不与题面绑定 → 可能顶替掉一道真实的权限题。完整攻击链、
+       现有边界（卡寿命 ≤600s / qid 0..99 / 需已配 UID 的浏览器）与便宜的根治
+       方向（给片段加一段基于 UID 的截短 HMAC，14 个 b64 字符，注意 file:// 下
+       crypto.subtle 不保证可用）见 spec-p4 §10「通知片段是一条无鉴权的语义注入
+       信道」。**该修法要动协议、业主尚未裁决，列为跟进批次二候选，本波不实现。** */
+    /* T7：这一刀也必须补标记（第三参 true）。只补 applyWebFrame 那边等于没补——
+       本刀已把长度削到恰等于 n，applyWebFrame 再钳同口径会走 len<=n 早退，
+       一个标记也不会出现；两处都补则不累积（同理）。 */
+    doc.x = clampChars(String(doc.x || ''), 60, true);
+    doc.h = clampChars(String(doc.h || ''), 120, true);
+    doc.g = clampChars(String(doc.g || ''), 200, true);
     doc.p = Array.isArray(doc.p) ? doc.p.slice(0, 4)
-              .map(function (o) { return clampChars(String(o), 60); }) : [];
+              .map(function (o) { return clampChars(String(o), 60, true); }) : [];
     doc.k = Array.isArray(doc.k) ? doc.k.slice(0, 2)
-              .map(function (o) { return clampChars(String(o), 60); }) : [];
+              .map(function (o) { return clampChars(String(o), 60, true); }) : [];
     doc.a = Math.min(600, doc.a | 0);
     const u = Number(doc.u);
     if (!Number.isFinite(u) || u <= 0) return;   // 无发布时刻 → 拒收，见上文 M4
-    applyWebFrame(doc, u);                       // 判重/过期/校准全部复用
+    applyWebFrame(doc, u, 'frag');               // 判重/过期/校准全部复用
   } catch (e) {
     /* 失败静默：坏片段等于没片段，页面照常走轮询 */
   } finally {
