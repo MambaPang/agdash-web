@@ -140,7 +140,9 @@ section { margin-bottom: 14px; }
   border-radius: 10px; padding: 0 18px; font-size: 15px;
 }
 .charcnt { font-size: 12px; color: var(--muted); text-align: right; margin-top: 4px; }
-/* T7 复审修复波：云端 128 码点收敛后题卡可能只是摘要，页面自己推断出来后提示。
+/* T7 复审修复波：云端限额（128 码点 ∧ 191 字节）收敛后题卡可能只是摘要，页面
+   自己推断出来后提示。中文题多半是被**字节**那道削下来的，故这条提示的文案里
+   不许写死任何一个限额数字（check-page.mjs 有断言钉着）。
    T7 收尾波订正：上一波注释写"只用既有色板、不引入新颜色"——那句只对**文字色**
    成立（var(--warn)/var(--danger)），底色/边框当时新造了 #2A2210/#4A3C17 两个
    值。现改为复用 #banner.net 那对既有黄色底/边（#3A2C10/#5A4620），全页黄色警示
@@ -300,8 +302,10 @@ body.settings #viewMain { display: none; }
  *  上行帧（本页构造，与批次一/二字面逐字一致）：
  *    a  {"o":"a","m":M,"i":N,"r":"y|n|1..4|k1|k2"}
  *    t  {"o":"t","m":M,"i":N,"x":"自由文字"}   v1.2 新增。x 的长度上限不是
- *       一个固定字数：整帧受云端 128 码点硬限，信封占 30~31，故页面名义上限
- *       TEXT_MAX_CHARS=90 再按整帧实际码点数收敛（见 fitTextFrame）
+ *       一个固定字数：整帧受云端**两条**硬限（128 码点 ∧ 191 字节），信封占
+ *       30~31，故页面名义上限 TEXT_MAX_CHARS=90 再按整帧实测的**码点与字节**
+ *       双判据收敛（见 frameFits/fitTextFrame）。中文实测只发得出 52 字——
+ *       名义上限 90 只在纯 ASCII 时才是真上限。
  *    m  {"o":"m","v":0|1}
  *  状态帧（collector payload.py）：
  *    d  {"v":2,"m":"w|m","s":"r|w|d|i","e":s,"d":n,"t":n,"q":-1,"c":%,"r":%,"g":msg}
@@ -334,8 +338,43 @@ const OFFLINE_MS      = 90000;  // 手机页专用灰化阈值（spec §10 裁�
  * 的缺陷正是"钳制是一个数、UI 文案写着另一个数"，骗了业主一整波；
  * web/tools/check-page.mjs 里有一条断言专门禁止再出现写死的字数文案。
  */
+/* 2026-08-19 热修：上面整段只说了**一半**。postJsonMsg 的 msg 有**两条独立限制**，
+ * T7 那波只修了第一条：
+ *   ① 接收 ≤128 个**码点** —— 超了回 code 10002，**明着拒绝**（页面报「发送失败」）。
+ *   ② 落地 ≤191 个 **UTF-8 字节** —— 超了回 **code 0 假装收下，然后静默丢弃**：
+ *      既不进 alltopic 末消息、也不推给 MQTT 订阅者。控制器真云端二分实测
+ *      189/190/191 落地、**192 不落地**；把外层 POST body 从 461 缩到 289 后
+ *      192 那条照样不落地 → 限制在 msg 本身，不是请求体。
+ * 为什么 t 帧是全部十条上云链路里**最坏**的一条：只有它有**正向的成功确认**。
+ * 90 个汉字 = 121 码点（过①）/ 301 字节（栽②）→ bemfaPublish 见 code===0 →
+ * rememberRaw 推游标 → markResolved → closeQuestion('文字已发送')。业主看到
+ * 「文字已发送」、卡片关闭、去重游标压制重现，而 collector 一个字都没收到，
+ * 60 秒后 defer。三个信号全在说"成功"。**静默区 = 54~90 个汉字**（53 字 = 190
+ * 字节仍落地），恰好是"一句稍长的中文答案"。
+ * 收敛预算取 188 而不是顶到 191：少发一个汉字（恰好 3 字节）换一道余量——**页面
+ * 这条路上这个交换是划算的**，理由见下面 FRAME_MAX_BYTES 的注释。
+ *
+ * **与 collector 侧的关系（2026-08-19 收尾波订正——上一版这里写的"MAX_BYTES/
+ * CLOUD_MAX_BYTES 同源同值"从那天起就不成立了）**：
+ *   - `CLOUD_MAX_BYTES` = 191：两侧**同值**，它是云端的事实，不是我们的选择。
+ *   - 收敛预算：页面 `FRAME_MAX_BYTES` = 188，collector 的 `MAX_BYTES` = **191**
+ *     （控制器 2026-08-19 裁决把 collector 侧的余量取消了）。**刻意不同步**，
+ *     两边的取舍不一样：
+ *     · collector 侧余量的代价是**业主看得见**的——同一道中文四选项题在 188 下
+ *       三条选项会收敛成逐字相同、只能盲选；那里 3 字节换不到等价的东西。
+ *     · 页面侧余量的代价是业主的自由文字少发**一个字**（52 而不是 53），而买到的
+ *       是本文件唯一咽喉 `bemfaPublish` 那道绊线的**提前量**：页面这条路是十条
+ *       上云链路里唯一有"正向成功确认"的，静默丢弃在这里代价最大，所以宁可少
+ *       发一个字，也要让"预算算错一点点"先撞在绊线上而不是撞进黑洞。
+ *   谁要动这两个数，先读这段；两侧都有断言钉着（check-page.mjs 2.1/2.6c 与
+ *   collector/tests/test_cloud_byte_budget.py 组 6）。
+ */
 const TEXT_MAX_CHARS  = 90;     // 名义上限（UI 显示与 sendText 钳制同源此常量）
-const FRAME_MAX_CP    = 128;    // 云端 msg 硬限, 单位 Unicode 码点（对齐 ctl_channel.MAX_CHARS）
+const FRAME_MAX_CP    = 128;    // ① 云端接收硬限, 单位 Unicode 码点（对齐 ctl_channel.MAX_CHARS）
+const CLOUD_MAX_BYTES = 191;    // ② 云端**落地**硬限, 单位 UTF-8 字节（超了静默丢弃）
+const FRAME_MAX_BYTES = 188;    // ② 的**页面**收敛预算 = 191 − 3 余量（理由见上；
+                                // collector 侧的同名预算 2026-08-19 起是 191，
+                                // 两边刻意不同步——别"顺手对齐"）
 const TEXT_FIT_ROUNDS = 12;     // 整帧收敛二分轮数上限（90 字需 7 轮, 12 是余量）
 const RESOLVED_TTL_MS = 600000; // 去重游标 10min 过期（qid mod 100 复用防误伤）
 // 已知边界（复审记录，仅注释不改逻辑）：collector 重启会把 _next_qid 归零，
@@ -445,6 +484,11 @@ function esc(s) {
 // 写死 100）是既有 UI 契约"超出部分将被截断"，语义是限长而非显示省略。
 // 将来新增的调用点也默认保持今天的行为。
 function cpLen(s) { return Array.from(String(s)).length; }   // 码点数（非 UTF-16 单元）
+/* UTF-8 字节数 —— 云端第二条限制（191 字节落地上限）的计量单位。
+   注意它与 cpLen 数的是**两样东西**：汉字 1 码点 = 3 字节、emoji 1 码点 = 4 字节，
+   所以两条判据必须**同时**判、不能拿一条替另一条（那正是 T7 漏掉 ② 的形状）。
+   TextEncoder 是 CSP 无关的纯语言内建，不引入任何外部依赖。 */
+function utf8Len(s) { return new TextEncoder().encode(String(s)).length; }
 function clampChars(s, n, mark) {
   const cps = Array.from(String(s));
   if (cps.length <= n) return String(s);      // 未截断 → 不留痕
@@ -456,7 +500,8 @@ function clampChars(s, n, mark) {
   return cps.slice(0, n - 1).join('').replace(/…+$/, '') + '…';
 }
 /* T7 复审修复波（第 2 组 e）：**零协议成本**的"缩水"解歧义。
-   云端那条线（开着页面轮询）看到的 W 帧已经过 collector 的 128 码点保结构降级
+   云端那条线（开着页面轮询）看到的 W 帧已经过 collector 的保结构降级
+   （判据是 128 码点 ∧ 191 字节两条；中文题多半是被字节那道削下来的）
    （见 ctl_channel._shrink_web_step），题干/表头/选项都可能只是摘要；极端情况下
    四个选项被削成逐字相同（"把超时从 …"），业主盲选一个就是不可撤销的错答。
    页面无法拿到全文，但**能自己看出被削了**，于是至少能提醒业主别盲选：
@@ -534,8 +579,48 @@ async function bemfaGet(path, params) {
   } finally { clearTimeout(timer); }
 }
 
-/* 发布一帧到控制主题；成功判据 code===0（与 collector publish 一致） */
+/* 这一帧**真的会到达**吗——按云端两条**硬限**判（不是我们的收敛预算）。
+ * 与 frameFits() 是一对：frameFits 是"我们打算收敛到哪"（FRAME_MAX_BYTES，
+ * 留了余量），frameLands 是"云端到底收不收得下"（CLOUD_MAX_BYTES）。
+ * 与 collector 侧 cloud_limits.lands() 同一套判据、同一个用途。 */
+function frameLands(f) {
+  return cpLen(f) <= FRAME_MAX_CP && utf8Len(f) <= CLOUD_MAX_BYTES;
+}
+/* 绊线响时给业主看的那一句。提成纯函数是为了能被 check-page.mjs 对**整句**下
+ * 断言（同 truncNotice 的既有姿态：文案是业主可见契约，钉子串钉不住方向）。
+ * 两条限制分开报：超码点是云端**明着拒**（code 10002），超字节是云端**假装收下
+ * 再静默丢弃**（code 0）——表现与排查方向完全不同，混成一句就把 2026-08-19
+ * 那半天的实测又丢了一遍。句首一律先说"没发出去"，这是业主唯一必须知道的事。 */
+function overLimitNotice(frame) {
+  return cpLen(frame) > FRAME_MAX_CP
+    ? '这条没发出去：超出云端字数上限（' + cpLen(frame) + ' / ' + FRAME_MAX_CP + ' 字），请改短重发'
+    : '这条没发出去：超出云端字节上限（' + utf8Len(frame) + ' / ' + CLOUD_MAX_BYTES + ' 字节），请改短重发';
+}
+/* 发布一帧到控制主题；成功判据 code===0（与 collector publish 一致）
+ *
+ * **发布前绊线（2026-08-19 热修收尾）。今天永不触发**——a/m 帧恒短，t 帧全走
+ * planTextSend 的整帧收敛。它守的是"以后"：谁加一条新帧、或者绕过 planTextSend
+ * 直接把 buildTextFrame 的结果丢进来，都会在这里被拦下而不是被云端静默吃掉。
+ *
+ * 为什么页面这条路比 collector 那两条更需要它：**只有这条路有正向的成功确认**。
+ * 超 191 字节的 msg 云端回的是 code 0，于是下面 `doc.code === 0` 那一支会走完
+ * 全套"成功"动作 —— rememberRaw 推去重游标、markResolved 收卡、弹「文字已发送」
+ * ——而 collector 一个字都没收到，60 秒后 defer。业主拿到的三个信号全在说成功。
+ * 绊线把这个**不可观测**的失败换成一个**看得见**的失败（返回 false + 一句明说
+ * "没发出去"的提示，且不推游标、不收卡，题还在，可以改短了重发）。
+ *
+ * 判据用硬限而不是 FRAME_MAX_BYTES：这道防御该说的是"云端真的会丢"，不是
+ * "我们的余量没守住"。误报一次 = 白丢一次发送，代价不对称。
+ *
+ * 提示延后 200ms：toast 是单例，调用方在拿到 false 之后还会各自弹一句
+ * （sendText/sendAnswer 的「发送失败，请重试」、sendMode 的「模式帧发送失败」），
+ * 那三句会盖掉先弹的。而这里要说的恰恰不是"重试"——重试永远失败。同 sendText
+ * 里截断提示的既有姿态。 */
 async function bemfaPublish(frame) {
+  if (!frameLands(frame)) {
+    setTimeout(function () { toast(overLimitNotice(frame)); }, 200);
+    return false;
+  }
   const body = { uid: cfg.uid, topic: cfg.topicCtl, type: 1, msg: frame };
   const ac = new AbortController();
   const timer = setTimeout(function () { ac.abort(); }, POST_TIMEOUT_MS);
@@ -891,18 +976,28 @@ function buildTextFrame(machine, qid, text) {
  * 码点在帧里至少占 1 个），但对被转义的字符是**双倍偿还**——90 个引号那次实测，
  * 帧 210 码点、deficit 82，砍掉 82 个引号后帧只剩 46，明明还能装 49 个引号却只
  * 发出去 8 个。少发一多半字还倒过来触发"已截断"提示，比不收敛好不了多少。
- * 帧长随前缀长度**严格单调递增**（每多一个码点至少多 1），故可二分出"最长发得
- * 出去的前缀"，代价是 ~log2(n) 次重建（n≤90 时 7 次），结果是紧贴 128 的最优解。
+ * 帧长随前缀长度**严格单调递增**（每多一个码点：码点数至少多 1、字节数至少多 1），
+ * 故可二分出"最长发得出去的前缀"，代价是 ~log2(n) 次重建（n≤90 时 7 次），结果是
+ * 紧贴预算的最优解。
+ * **2026-08-19：判据从"只看码点"改成 frameFits()（码点 ∧ 字节）。** 单调性对字节
+ * 同样成立（这里是**纯前缀**二分，不涉及「…」标记，所以不像 collector 侧
+ * _cap_labels 那样有非单调问题），故二分结构、轮数上限、cut 语义、planTextSend、
+ * truncNotice 全部零改动——变的只有"装得下"这三个字怎么算。中文实测落点：
+ * 满额 90 汉字 → 发出 52 字（帧 83 码点 / 187 字节），业主读到
+ * 「内容过长，只发出了前 52 字（原 90 字）」。
  * 循环有界：hi−lo 每轮至少减半，另加 TEXT_FIT_ROUNDS 硬上限兜底——打到上限只会
  * 保守地少发几个字（lo 恒是"已验证发得出去"的长度），绝不会发出超限帧。
  * 削的时候是**裸截**（不补「…」）：这是业主要发给 Claude 的答案正文，不该往里
  * 塞一个他没打的字符（同 clampChars 注释里的既有裁决）。
  * 返回 cut=true 表示"名义上限之外又被削掉了"，调用方必须让业主看见（静默截断
  * 比截断更坏）。 */
+function frameFits(f) {       // 两条判据**同时**成立才算发得出去（2026-08-19）
+  return cpLen(f) <= FRAME_MAX_CP && utf8Len(f) <= FRAME_MAX_BYTES;
+}
 function fitTextFrame(machine, qid, text) {
   const cps = Array.from(String(text));
   const whole = buildTextFrame(machine, qid, cps.join(''));
-  if (cpLen(whole) <= FRAME_MAX_CP) {
+  if (frameFits(whole)) {
     return { frame: whole, text: cps.join(''), cut: false, rounds: 0 };
   }
   let lo = 0;                 // 不变式: lo 个码点**已验证**装得下
@@ -911,7 +1006,7 @@ function fitTextFrame(machine, qid, text) {
   while (hi - lo > 1 && rounds < TEXT_FIT_ROUNDS) {
     const mid = (lo + hi) >> 1;
     const probe = buildTextFrame(machine, qid, cps.slice(0, mid).join(''));
-    if (cpLen(probe) <= FRAME_MAX_CP) lo = mid; else hi = mid;
+    if (frameFits(probe)) lo = mid; else hi = mid;
     rounds++;
   }
   const t = cps.slice(0, lo).join('');
@@ -1135,7 +1230,11 @@ function renderQuestions() {
     } else if (frameTruncated(q)) {
       warn = q.src === 'frag'
         ? '<div class="qwarn">题面较长，这里显示的是节选。</div>'
-        : '<div class="qwarn">题面已被云端 128 字上限削短，点推送通知可看全文。</div>';
+        /* 措辞订正（2026-08-19）：原文写死"128 字上限"。云端其实有**两道**限额
+           （128 码点 ∧ 191 字节），而真正把中文题削下来的往往是字节那道——写死
+           一个数会把读到它的业主往错误方向推（"我明明没打到 128 字啊"）。
+           改说"限额"，具体数字留在 README 与 spec 里讲。 */
+        : '<div class="qwarn">题面已被云端限额削短，点推送通知可看全文。</div>';
     }
     let body = '';
     if (q.kind === 'perm') {
@@ -1223,7 +1322,10 @@ document.getElementById('qArea').addEventListener('input', function (ev) {
   if (!cnt) return;
   /* T7 复审修复波：分母恒是名义上限（同源 TEXT_MAX_CHARS），分子是**真实可发
      字数**——引号/反斜杠的 JSON 转义会让整帧提前撞上 128 码点，那时可发字数比
-     名义上限还少。先算出来再显示，别让业主打完了才知道被截。 */
+     名义上限还少。先算出来再显示，别让业主打完了才知道被截。
+     2026-08-19：现在还有第三种"提前撞线"——**191 字节的落地上限**。中文每字
+     3 字节、emoji 4 字节，所以打中文时这里会显示「52 / 90」而不是「90 / 90」。
+     分子走 fitTextFrame 实算，判据一改这里自动跟上，不必也不许在此另写一份。 */
   const q = S.questions.get(card.getAttribute('data-key'));
   const clean = clampChars(ev.target.value.replace(/[\u0000-\u001F\u007F]/g, ''),
                            TEXT_MAX_CHARS);
