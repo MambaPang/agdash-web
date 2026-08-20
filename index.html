@@ -1331,8 +1331,12 @@ document.getElementById('qArea').addEventListener('input', function (ev) {
                            TEXT_MAX_CHARS);
   const room = q ? cpLen(fitTextFrame(q.machine, q.qid, clean).text)
                  : Math.min(n, TEXT_MAX_CHARS);
-  cnt.textContent = Math.min(n, room) + ' / ' + TEXT_MAX_CHARS +
-    (n > room ? '（超出部分将被截断）' : '');
+  /* 2026-08-19 业主实测报 bug：分母写死成名义上限 90 时，打中文会显示「53 / 90」
+     ——那读起来是"还能再打 37 个字"，而真实剩余是 0（中文每字 3 字节，191 字节的
+     落地上限先卡死）。90 是打中文时**永远到不了**的数，显示它就是误导。
+     改成 **分子=你打了多少、分母=这条内容真正发得出多少**：打中文时显示
+     「95 / 53（超出部分将被截断）」，天花板一眼可见；打英文时仍是「40 / 90」。 */
+  cnt.textContent = n + ' / ' + room + (n > room ? '（超出部分将被截断）' : '');
 });
 document.getElementById('qArea').addEventListener('keydown', function (ev) {
   if (ev.key === 'Enter' && ev.target.matches('[data-free]')) {
@@ -1528,11 +1532,32 @@ function b64urlToUtf8(s) {
   return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
+/* 批次二 §2.2：片段验签。密钥是巴法云 UID（collector 与本页已共享的秘密）。
+   验不过 → **一律当作没有片段**（照常轮询出卡），控制台留一行，不弹 toast：
+   业主对这条无能为力，弹它只会训练他忽略提示。
+   crypto.subtle 需要安全上下文：GitHub Pages 是 https、127.0.0.1 也算；页面被
+   存成本地文件（file://）时可能不可用 → 同样当作没片段（安全默认）。 */
+function b64urlBytes(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+async function verifyFragSig(payload, sig) {
+  try {
+    if (!cfg.uid || !window.crypto || !crypto.subtle) return false;
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey('raw', enc.encode(cfg.uid),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const mac = await crypto.subtle.sign('HMAC', key, enc.encode(payload));
+    return b64urlBytes(new Uint8Array(mac).slice(0, 10)) === sig;
+  } catch (e) { return false; }
+}
+
 /* 从 location.hash 取 W 帧并走既有 applyWebFrame 出卡；任何异常一律静默。 */
 function ingestFragmentQuestion() {
   let consumed = false;
   try {
-    const mt = /^#q=([A-Za-z0-9_-]+={0,2})$/.exec(String(location.hash || ''));
+    const mt = /^#q=([A-Za-z0-9_-]+={0,2})\.([A-Za-z0-9_-]{14})$/.exec(String(location.hash || ''));
     if (!mt) return;
     consumed = true;                         // 认得这个片段：无论成败都擦掉
     if (mt[1].length > FRAG_MAX_B64) return;
@@ -1547,10 +1572,12 @@ function ingestFragmentQuestion() {
        攻击者用一条 `#q=<自造 W 帧>` 链接就能造出一张与真题外观一致的卡，业主点
        「允许」后页面用他自己的 UID 发出答案帧，而 collector 对答案帧只校验
        (machine, qid)、不与题面绑定 → 可能顶替掉一道真实的权限题。完整攻击链、
-       现有边界（卡寿命 ≤600s / qid 0..99 / 需已配 UID 的浏览器）与便宜的根治
-       方向（给片段加一段基于 UID 的截短 HMAC，14 个 b64 字符，注意 file:// 下
-       crypto.subtle 不保证可用）见 spec-p4 §10「通知片段是一条无鉴权的语义注入
-       信道」。**该修法要动协议、业主尚未裁决，列为跟进批次二候选，本波不实现。** */
+       现有边界（卡寿命 ≤600s / qid 0..99 / 需已配 UID 的浏览器）见 spec-p4 §10
+       「通知片段是一条无鉴权的语义注入信道」。**批次二 §2.2 起已落实上面提到的
+       根治方向**：片段末尾挂一段基于 UID 的截短 HMAC（14 个 b64 字符），验签见
+       下方 verifyFragSig，通不过一律当没片段。**明确不防**：已经拿到 UID 的人——
+       那需要给答案帧加 nonce（题面绑定），属协议改动，留给阶段五。file:// 下
+       crypto.subtle 可能不可用，此时同样降级为"当没片段"（安全默认）。 */
     /* T7：这一刀也必须补标记（第三参 true）。只补 applyWebFrame 那边等于没补——
        本刀已把长度削到恰等于 n，applyWebFrame 再钳同口径会走 len<=n 早退，
        一个标记也不会出现；两处都补则不累积（同理）。 */
@@ -1564,7 +1591,14 @@ function ingestFragmentQuestion() {
     doc.a = Math.min(600, doc.a | 0);
     const u = Number(doc.u);
     if (!Number.isFinite(u) || u <= 0) return;   // 无发布时刻 → 拒收，见上文 M4
-    applyWebFrame(doc, u, 'frag');               // 判重/过期/校准全部复用
+    verifyFragSig(mt[1], mt[2]).then(function (ok) {
+      if (!ok) {                      // 签名不符/无法验签 → 当作没片段
+        console.warn('[agdash] 片段签名验证未通过，已忽略该片段（照常轮询）');
+        return;
+      }
+      applyWebFrame(doc, u, 'frag');  // 判重/过期/校准全部复用
+      renderQuestions();              // 异步分支里必须自己触发一次渲染
+    });
   } catch (e) {
     /* 失败静默：坏片段等于没片段，页面照常走轮询 */
   } finally {
